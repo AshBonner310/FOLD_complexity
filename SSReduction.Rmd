@@ -1,0 +1,534 @@
+---
+title: "Steady State Reduction"
+author: "Ashley Bonner"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#useful functions in here
+
+library(tidyverse) #data library
+library(deSolve) #ODE solver
+library(DiagrammeR) #flow charts
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# A standard one pool model
+
+The rate of change of soil carbon stocks is the balance between the inputs and the outputs because of conservation of mass -- carbon is neither created nor distroyed.
+In this simple one pool model we assume a constant input rate ($u$; [mass per area per time]).
+The outputs are assumed to be proportional to the stock that is there.
+There are other functional forms that could also use but this is the simplest (and also happens to fit incubation experiments).
+
+$\frac{dC}{dt} = u - kC$
+
+where 
+
+  + $C$ is the carbon stock [mass per area]. This is often on the order of 1 to 150 kg-organic-carbon m^-2^ for the first meter of soil (HWSD2)
+  + $u$ is the inputs into the soil [mass per area per time]. Between root exodase, root turnover, and surface litter, inputs are difficult to quantify directly. However net primary productivity is often used as a proxy for soil inputs and varies between 0 to 2.5 kg-organic-carbon m^-2^ yr^-1^ with the geographic mode occurring around 0.2 kg-C m^-2^ yr^-1^ (MODIS - MOD17A3)
+  + $k$ is the decay rate is the fraction of carbon leaving the soil carbon pool per time. This is often framed as it's inverse, turnover time ($k=\frac{1}{\tau}$) which has many interpretation but for this model is the average length of time a carbon atom will spend in the soil. The bulk turnover time in Earth system models is on the order of 10 to 50 years (CMIP5 and CMIP6).
+  
+From this model we can calculate the steady state value where the rate of change is zero.
+This describes the carbon stock that the system is trending towards as it matures.
+
+$C_{ss} = \frac{u}{k} = u k^{-1}$
+
+This also gives us a useful check on our ranges if we assume that soil carbon stocks are generally close to steady state. 
+$u\tau = [0, 0.2, 2.5] [10, 15, 50] = [0, 3, 125] $
+This is reassuring! 
+It's very very close to the stated ranges for the soil carbon stocks of $[1,150]$.
+
+We can also look at the inputs and carbon stocks to infer the turnover times.
+$\frac{C}{u} = \frac{[1, 150]}{[[0.1, 2.5]]} = [0.4, 1500]$
+which is a MUCH larger range of turnover times.
+So this would be consistent with the observations but maybe not constraining of the parameters.
+
+```{r}
+ #u; [0, 2.5] kg-carbon m-2 yr-1; evenly split per month for now
+parameter.ls <- list(inputs = 0.2/12, 
+                     #\tau; [10, 50] yr, by month
+                     turnoverTime = 15*12) 
+
+simTime <- 100*12
+
+#rate change function
+dCdt_1pool <- function(t, y, parms){
+  ans <- parms$inputs - y / parms$turnoverTime
+  return(list(ans))
+}
+
+#steady state function
+C_ss_1pool <- function(parms){
+  ans <- parms$inputs * parms$turnoverTime
+  return(c(C = ans))
+}
+
+InitialCarbon_1pool <- C_ss_1pool(parms = parameter.ls)*0.7  %>% setNames("C")
+
+# Numerically solving this is a little bit overkill since 
+# ...the differential equation is solvable but for generalizations here is the numerical
+# ...solution from the function lsoda in the deSolve package
+sim_1pool <- lsoda(y = InitialCarbon_1pool,
+                times = 0:simTime,
+                func = dCdt_1pool,
+                parms = parameter.ls) %>%
+  as.data.frame() 
+
+ggplot(sim_1pool) +
+  geom_line(aes(x=time, y=C))
+```
+Tracking carbon stocks in soil is important to understanding how much carbon could be sequestered, and helps to answer questions around whether soil could serve as a carbon sink or as a source across diverse ecosystems as our climate changes.
+Another important metric we will be considering is how much CO$_2$ is respired over a certain period of time.
+This largely depends on where the model starts, but discussing the basics here seems pertinent.
+
+At any point in time, the rate of gaseous CO$_2$ respired from the soil is
+
+$$\frac{dG}{dt} = kC$$
+
+and the total CO$_2$ respired from time $t=0$ to $t=T$ is
+
+$$G(t) = \int_0^T kC(t) dt$$
+
+This gives us good motivation to solve the seperable ordinary differential equation for the one-pool model above.
+
+$$\frac{dC}{dt} = u - kC \implies C(t) = \frac{u}{k} - Ae^{-kt} $$
+
+where $A$ is a stand-in for some constant.
+We can find this constant by calling the initial value of the system $C_0$, such that $C(t=0)=C_0$.
+
+$$C(0)=C_0 = \frac{u}{k} - Ae^k(0) = \frac{u}{k}-A \implies A= \frac{u}{k}-C_0$$
+
+This means we can develop an expression for how much gaseous CO$_2$ has respired from the soil:
+
+$$G(T) = \int_0^T k\left( \frac{u}{k} - \left(\frac{u}{k}-C_0\right)e^{-kt}\right) dt = uT + k \left( u-kC_0 \right)\left(1-e^{-kT}\right)$$
+Let's apply this to our simulation above.
+
+```{r}
+
+RespiredCarbon <- function(endtime, parms, initialstate) {
+  G = parms$inputs*endtime +
+      ((parms$inputs - initialstate/parms$turnoverTime)/parms$turnoverTime)*(1-exp(-endtime/parms$turnoverTime))
+  return(G)
+}
+
+sim_1pool <- sim_1pool %>% 
+  mutate(RespiredC = RespiredCarbon(endtime=time, parms=parameter.ls, initialstate=InitialCarbon_1pool) ) %>%
+  as.data.frame()
+
+ ggplot(sim_1pool) +
+  geom_line(aes(x=time, y=C)) +
+  geom_area(aes(x=time, y=RespiredC), alpha=0.5)
+
+
+
+```
+
+
+#The three-pool feedback model
+
+Model description goes here!
+
+```{r}
+
+##3pool_feedback
+
+#Notes on the input fraction calculations (gleaned from Parton's CENTURY model)
+  #Parton uses MONTHLY time steps
+  #Century breaks up plant residue into metabolic C and Structural C based on the Lignin to Nitrogen ratio.
+    #We will be using a 7/1 Lignin to Nitrogen ratio, thus 12.5% of plant litter is in the form of metabolic C and 87.5% is a structural C.
+    #Century then sends 45% of metabolic C to the fast pool (the rest decays before entering the soil pool). - including this fraction breaks mass balance so it is omitted
+ #Century then sends a portion of structural C to the fast and slow pools based on the lignin fraction A.
+    ### !!!! because I have no idea what the lignin fraction even is, I'm using the placeholder value of 50%.
+    # 70% of A* Structural C goes to the Slow pool (rest decays before reaching soil) - including this fraction breaks mass balance so it is omitted
+    # 45% (?) of (1-A)*Structural C goes to fast (rest decays before reaching soil) - including this fraction breaks mass balance so it is omitted
+
+century_parameter.ls <- list(inputs = 0.2/12, #monthly; divided evenly between the months
+                            input_to_fast = ((.125)+(.875*.5)),  
+                            input_to_slow = .875*.5,  
+                                                   #note: Century includes no direct inputs to the passive pool.
+                     #fast turnover according to Century \tau; [2, 4] yr
+                     turnoverTime_fast = 1.5*12,    #1.5y  
+                     #slow turnover according to Century \tau; [20, 50] yr
+                     turnoverTime_slow = 25*12,       #25y
+                     #passive turnover according to Century \tau: [800, 1200] yr
+                     turnoverTime_passive = 1000*12,  #1000y
+                     
+                       fast_to_slow = 0.486,       # This is determined in CENTURY based on a soil vs. silt & clay fraction
+                                                        # if soil to silt+clay fraction is zero, then = .15-.004
+                                                        # if fraction is 1, then =.83-.004
+                                                        # currently using the average between the two: .486
+                       fast_to_passive = 0.004,    #
+                       slow_to_fast = 0.42,        #
+                       slow_to_passive = 0.03,     #
+                       passive_to_fast = 0.45,     #
+                       passive_to_slow = 0         # CENTURY does not include this flow
+                       )
+
+#steady state calculations for each pool
+C_ss_3feedback <- function(parms){
+  allocation_vector <- matrix(c(parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                1 - parms$input_to_fast - parms$input_to_slow),
+                              nrow = 3)
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+                              -parms$fast_to_slow, 1, -parms$passive_to_slow,
+                              -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                            nrow = 3,
+                            byrow=TRUE)
+  #0 = inputs * allocation - decay_matrix %*% transfer_matrix %*% y
+  #decay_matrix %*% transfer_matrix %*% y = inputs * allocation
+  
+  ans <- solve(decay_matrix  %*% transfer_matrix ,parms$inputs * allocation_vector)
+  
+  return(c(C_fast = ans[1],
+           C_slow = ans[2],
+           C_passive = ans[3]))
+}
+
+
+#ODE equation
+dCdt_3feedback <- function(t, y, parms){
+ pools <- matrix(y[1:3], nrow=3)
+ allocation_matrix <- matrix(c(parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                1 - parms$input_to_fast - parms$input_to_slow),
+                              nrow = 3)
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+                              -parms$fast_to_slow, 1, -parms$passive_to_slow,
+                              -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                            nrow = 3,
+                            byrow=TRUE)
+  ans <- parms$inputs * allocation_matrix - decay_matrix %*% transfer_matrix %*% pools
+  
+  
+  ##TRYING TO ADD RESPIRATION HERE AND IT AIN'T WORKIN##
+
+  
+  # dgasdt <- parms$turnoverTime_fast*(1- parms$fast_to_slow - parms$fast_to_passive)*ans[1]  +
+  #         parms$turnoverTime_slow*(1- parms$slow_to_fast - parms$slow_to_passive)*ans[2]  +
+  #         parms$turnoverTime_passsive*(1- parms$passive_to_fast - parms$passive_to_slow)*ans[3] 
+  
+  return(list(c(C_fast = ans[1],
+           C_slow = ans[2],
+           C_passive = ans[3]#,
+           #Resp_C = dgasdt
+           )))
+}
+
+
+#initial value
+InitialCarbon_3pool <- C_ss_3feedback(parms = century_parameter.ls)*0.6
+
+#making a more realistic simulation time for a monthly model with turnover times in the 1000s
+simTime=1000*12
+
+#simulation
+sim_3feedback <- lsoda(y = InitialCarbon_3pool,
+                      times = 0:simTime,
+                      func = dCdt_3feedback,
+                      parms = century_parameter.ls) %>%
+  as.data.frame() %>%
+  pivot_longer(cols = C_fast:C_passive,
+               names_to = 'pool',
+               values_to = 'stock')%>%
+  mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
+         model = '3feedback')
+
+#Feedback graph by pools:
+ggplot(sim_3feedback #%>%
+         #bind_rows(sim_3cascade, sim_3independent)
+       ) +
+  geom_line(aes(x=time, y=stock, color = model)) +
+  facet_wrap(~ pool)
+
+```
+
+```{r One_Pool_Proxy_Decay_Rate}
+##One Pool Proxy Method:
+
+#Proxy Decay Rate Calculation
+Proxy_decayrate <- function(parms){
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  
+  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+                              -parms$fast_to_slow, 1, -parms$passive_to_slow,
+                              -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                            nrow = 3,
+                            byrow=TRUE)
+  
+   allocation_vector <- matrix(c(parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                1 - parms$input_to_fast - parms$input_to_slow),
+                              nrow = 3)
+  
+  ans <- sum(solve(decay_matrix %*% transfer_matrix) %*% allocation_vector)
+  return(ans)
+}  
+
+
+##Adds the proxy rate to the main parameter list
+century_parameter.ls$turnoverTime <- Proxy_decayrate(parms=century_parameter.ls)
+
+
+#Initial Value for the One Pool Proxy, simulation, with name for lsoda output
+InitialCarbon_1pool <- sum(C_ss_3feedback(parms = century_parameter.ls))*0.6 %>% setNames("C")
+
+#Simulation with the one-pool model
+sim_Feedback_OnePool <- lsoda(y = InitialCarbon_1pool,
+                times = 0:simTime,
+                func = dCdt_1pool,
+                parms = century_parameter.ls) %>%
+  as.data.frame()
+
+
+#Calculating total C in the Feedback run
+sim_3feedback <- sim_3feedback %>%
+  pivot_wider(names_from="pool", values_from="stock") %>%
+  mutate(Feedback_C_Total = C_fast + C_slow +C_passive) 
+
+#Add the one-pool proxy column
+sim_3feedback$OnePoolProxy <- sim_Feedback_OnePool$C
+
+
+#Formatting the data for nice graphing:
+sim_3feedback <- sim_3feedback %>% 
+                    select(time, Feedback_C_Total, OnePoolProxy) %>%
+                    pivot_longer(cols = c("Feedback_C_Total", "OnePoolProxy"),
+                                 names_to = "model",
+                                 values_to = "stock")
+
+
+#Plot comparing the two
+ggplot(sim_3feedback) +
+  geom_line(aes(x=time, y=stock, color=model))
+
+
+```
+
+#Repsired Carbon
+
+Nothing wants to work :,)
+
+```{r RespiredC}
+# #ODE equation with Respired Carbon
+# dCdt_3feedback <- function(t, y, parms){
+# 
+#   dCf <- parms$inputs*parms$input_to_fast -
+#           (1/parms$turnoverTime_fast)*y[1] +
+#           (1/parms$turnoverTime_slow)*parms$slow_to_fast*y[2] +
+#           (1/parms$turnoverTime_passive)*parms$passive_to_fast*y[3]
+#     
+#   dCs <- parms$inputs*parms$input_to_slow -
+#           (1/parms$turnoverTime_slow)*y[2] +
+#           (1/parms$turnoverTime_fast)*parms$fast_to_slow*y[1] +
+#           (1/parms$turnoverTime_passive)*parms$passive_to_slow*y[3]
+#   
+#   dCp <- parms$inputs*(1-parms$input_to_fast- parms$input_to_slow) -
+#           (1/parms$turnoverTime_passive)*y[3] +
+#           (1/parms$turnoverTime_fast)*parms$fast_to_passive*y[1] +
+#           (1/parms$turnoverTime_slow)*parms$slow_to_passive*y[2]
+# 
+#   dgas <-  parms$turnoverTime_fast*(1- parms$fast_to_slow - parms$fast_to_passive)*y[1]  +
+#           parms$turnoverTime_slow*(1- parms$slow_to_fast - parms$slow_to_passive)*y[2]  +
+#           parms$turnoverTime_passsive*(1- parms$passive_to_fast - parms$passive_to_slow)*y[3]
+#   
+#   return(list(c(C_fast = dCf,
+#            C_slow = dCs,
+#            C_passive = dCp,
+#            Resp_C = dgas
+#            )))
+# }
+# 
+# #New Initial state with respired carbon column
+# InitialCarbon_3pool <- c(C_ss_3feedback(parms = century_parameter.ls)*0.6, "Gas"=0)
+# 
+# #simulation
+# sim_3feedback <- lsoda(y = InitialCarbon_3pool,
+#                       times = 0:simTime,
+#                       func = dCdt_3feedback,
+#                       parms = century_parameter.ls) %>%
+#   as.data.frame() %>%
+#   pivot_longer(cols = C_fast:C_passive,
+#                names_to = 'pool',
+#                values_to = 'stock')%>%
+#   mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
+#          model = '3feedback')
+# 
+# 
+# #Formatting data table for Respired C calculation (1pool)
+# sim_3feedback <- sim_3feedback %>% 
+#                     pivot_wider(names_from = "model", values_from = "stock") %>%
+#                     mutate(Proxy_Respired_C = RespiredCarbon(endtime=time, parms=century_parameter.ls, initialstate=InitialCarbon_1pool))
+# 
+# 
+# 
+
+```
+
+
+## Inputs turned off
+
+How does this aggregate decay rate compare to the full model when soil is removed from its environment, and no new organic carbon enters the system?
+
+```{r InputsOff}
+#paramter list with no inputs
+no_input_century_parameter.ls <- century_parameter.ls %>% list_assign(inputs=0)
+
+#Creates a simulation using the full feedback model starting at SS, turn off inputs at time 240 (twenty years, monthly time steps)
+No_inputs_feedback_sim <- rbind(lsoda(y = C_ss_3feedback(parms = century_parameter.ls),
+                                      times = 0:240,
+                                      func = dCdt_3feedback,
+                                      parms = century_parameter.ls) %>%
+                                  as.data.frame(),
+                              lsoda(y = C_ss_3feedback(parms = century_parameter.ls),
+                                      times = 0:9760,
+                                      func = dCdt_3feedback,
+                                      parms = no_input_century_parameter.ls) %>%
+                                  as.data.frame() %>%
+                                  mutate(time=time+240)
+                                ) %>%
+                          mutate(Feedback_C_Total = C_fast + C_slow +C_passive) %>%
+                          mutate(C_ps = C_passive + C_slow) %>%
+                          as.data.frame
+                
+
+
+#Simulation with the one-pool model starting at SS, turn off inputs at time 240 (twenty years, monthly time steps)
+No_inputs_one_pool_proxy_sim <- rbind(lsoda(y = sum(C_ss_3feedback(parms = century_parameter.ls)),
+                                            times = 0:240,
+                                            func = dCdt_1pool,
+                                            parms = century_parameter.ls) %>%
+                                       as.data.frame() %>%
+                                       set_names(c("time", "One_Pool_Proxy")),
+                                      
+                                    lsoda(y = sum(C_ss_3feedback(parms = century_parameter.ls)),
+                                            times = 0:9760,
+                                            func = dCdt_1pool,
+                                            parms = no_input_century_parameter.ls) %>%
+                                      as.data.frame() %>%
+                                      set_names(c("time", "One_Pool_Proxy")) %>%
+                                      mutate(time=time+240)
+                                )
+#Makes a dataframe to compare the two simulations total carbon
+no_input_model_comparison <- as.data.frame(cbind(No_inputs_feedback_sim$time, No_inputs_feedback_sim$Feedback_C_Total, No_inputs_one_pool_proxy_sim$One_Pool_Proxy)) %>% 
+    set_names(c("time", "Feedback_C_Total", "One_Pool_Proxy")) %>%
+    pivot_longer(cols = c("Feedback_C_Total", "One_Pool_Proxy"),
+                                 names_to = "model",
+                                 values_to = "stock")
+
+
+
+ggplot(no_input_model_comparison)  +
+  # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=C_passive), alpha=0.1, fill="firebrick")+
+  # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=C_ps), alpha=0.1, fill="firebrick")+
+  # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=Feedback_C_Total), alpha=0.1, fill="firebrick")+
+  geom_line(aes(x=time, y=stock, color=model)) +
+  geom_vline(xintercept=240, alpha=0.5, linetype="dashed") +
+  labs(title="Inputs cut off after 20 years", y="Total Carbon (kg C/(m^2 yr))", x="Time (in months)" )
+
+
+
+```
+### Fluctuating Inputs
+
+NPP changes on diurnal, seasonal, and even longer-term cycles. When inputs are fluctuating, how does this one-pool proxy respond? We will focus on a yearly seasonal cycle (the parametrizations from Parton are monthly, so this makes sense as a starting point).
+
+```{r InputsFlux}
+#Function for simulation with the 3feedback model, adjusting the inputs for seasonal change
+dCdt_seasonal_3feedback <- function(t, y, parms){
+  pools <- matrix(y, nrow=3)
+  allocation_matrix <- matrix(c(parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                1 - parms$input_to_fast - parms$input_to_slow),
+                              nrow = 3)
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+                              -parms$fast_to_slow, 1, -parms$passive_to_slow,
+                              -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                            nrow = 3,
+                            byrow=TRUE)
+  #dcdt = inputs * allocation + transfer_matrix %*% decay_matrix %*% y
+  #decay_matrix %*% transfer_matrix %*% y = - inputs * allocation
+  
+  flux_input <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300)
+  
+  ans <- flux_input * allocation_matrix - decay_matrix %*% transfer_matrix %*% y
+  
+  return(list(c(C_fast = ans[1],
+           C_slow = ans[2],
+           C_passive = ans[3])))
+}
+
+
+#Demonstration simulation that the method works to create seasonal change, over 5 years
+seasonal_sim_3feedback <- lsoda(y = C_ss_3feedback(parms = century_parameter.ls),
+                                      times = 0:60,
+                                      func = dCdt_seasonal_3feedback,
+                                      parms = century_parameter.ls) %>%
+                                  as.data.frame() %>% 
+                                  mutate(Feedback_C_total = C_fast+C_slow+C_passive)
+
+                                  
+
+ggplot(pivot_longer(data=seasonal_sim_3feedback, cols = C_fast:C_passive, names_to = "pool", values_to = "stock")) +
+  geom_line(aes(x=time, y=stock, color=pool)) +
+  geom_line(aes(x=time, y=Feedback_C_total))
+
+
+#One-Pool rate change function, with seasonal rate of change
+  ##The calucation of the Proxy decay rate relies on a steady state solution, which technically does not exist when inputs change - we then assume that the average over the year is constant, and that the steady state solution suffices.
+
+dCdt_seasonal_1pool <- function(t, y, parms){
+  flux_input <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300)
+  ans <- flux_input - y / parms$turnoverTime
+  return(list(ans))
+}
+
+
+#Demonstration simulation that the method works to create seasonal change, over 5 years
+seasonal_sim_1pool <- lsoda(y = sum(C_ss_3feedback(parms = century_parameter.ls)) %>% setNames("C"),
+                                      times = 0:60,
+                                      func = dCdt_seasonal_1pool,
+                                      parms = century_parameter.ls) %>%
+                                  as.data.frame() %>%
+                                  rename(One_Pool_Proxy = C)
+
+ggplot(seasonal_sim_1pool) +
+  geom_line(aes(x=time, y=One_Pool_Proxy))
+
+                                
+#Makes a dataframe to compare the two simulations total carbon
+seasonal_inputs_model_comparison <- as.data.frame(cbind(seasonal_sim_3feedback$time, seasonal_sim_3feedback$Feedback_C_total, seasonal_sim_1pool$One_Pool_Proxy)) %>% 
+    set_names(c("time", "Feedback_C_Total", "One_Pool_Proxy")) %>%
+    pivot_longer(cols = c("Feedback_C_Total", "One_Pool_Proxy"),
+                                 names_to = "model",
+                                 values_to = "stock")
+
+
+
+ggplot(seasonal_inputs_model_comparison)  +
+  geom_line(aes(x=time, y=stock, linetype=model, color=model)) +
+  labs(title="Seasonal Variation over 5 Years", y="Total Carbon (kg C/(m^2 yr))", x="Time (in months)" )
+
+
+
+```
+Holy crap that's close!!!!
+
+###Increasing Inputs
+
+
+
+
