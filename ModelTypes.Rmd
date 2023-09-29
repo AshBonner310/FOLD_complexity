@@ -371,80 +371,80 @@ dCdt_Cascade2Ind(y = C_ss_3cascade(parms = parameter_cascade)*0.8, parms=paramet
   
   
   
-  dC_new_fast <- #(parms$inputs *parms$input_to_fast) -
-    #y[1]/parms$turnoverTime_fast
-  
-  dC_new_slow <- #(parms$inputs * parms$input_to_slow +
-               # y[1] / parms$turnoverTime_fast * parms$fast_to_slow)- 
-   # y[2]/parms$turnoverTime_slow
-  
-  dC_new_passive <- #(parms$inputs * (1-parms$input_to_fast - parms$input_to_slow) +
-                   #y[1] / parms$turnoverTime_fast * parms$fast_to_passive +
-                   #y[2] / parms$turnoverTime_slow * parms$slow_to_passive ) - 
-    #y[3]/parms$turnoverTime_passive
-  
-  return(list(c(C_fast = dC_new_fast,
-           C_slow = dC_new_slow,
-           C_passive = dC_new_passive)))
-}
+#   dC_new_fast <- #(parms$inputs *parms$input_to_fast) -
+#     #y[1]/parms$turnoverTime_fast
+#   
+#   dC_new_slow <- #(parms$inputs * parms$input_to_slow +
+#                # y[1] / parms$turnoverTime_fast * parms$fast_to_slow)- 
+#    # y[2]/parms$turnoverTime_slow
+#   
+#   dC_new_passive <- #(parms$inputs * (1-parms$input_to_fast - parms$input_to_slow) +
+#                    #y[1] / parms$turnoverTime_fast * parms$fast_to_passive +
+#                    #y[2] / parms$turnoverTime_slow * parms$slow_to_passive ) - 
+#     #y[3]/parms$turnoverTime_passive
+#   
+#   return(list(c(C_fast = dC_new_fast,
+#            C_slow = dC_new_slow,
+#            C_passive = dC_new_passive)))
+# }
 ```
 
 
 ```{r Cascade_OnePool_Proxy}
-decay_matrix <- diag(c(1/parameter.ls$turnoverTime_fast, 1/parameter.ls$turnoverTime_slow, 1/parameter.ls$turnoverTime_passive))
-
-allocation_matrix <- matrix(c(1, 0, 0,
-                              -parameter.ls$fast_to_slow, 1, 0, 
-                              -parameter.ls$fast_to_passive, -parameter.ls$slow_to_passive, 1), 
-                      ncol = 3, byrow=TRUE)
-
-comp_matrix <- decay_matrix %*% allocation_matrix
-
-adjustment_matrix <- eigen(comp_matrix)$vectors
-
-new_decay_rates <- diag(eigen(comp_matrix)$values)
-
-#comp_matrix == adjustment_matrix %*% new_decay_rates %*% solve(adjustment_matrix)
-
-
-##from above
-
-
-dCdt_3cascade <- function(t, y, parms){
-  
-  decay_allo_matrix <- matrix(data= c( parms$))
-  
-  
-  dC_fast <- (parms$inputs *parms$input_to_fast) -
-    y[1]/parms$turnoverTime_fast
-  
-  dC_slow <- (parms$inputs * parms$input_to_slow +
-                y[1] / parms$turnoverTime_fast * parms$fast_to_slow)- 
-    y[2]/parms$turnoverTime_slow
-  
-  dC_passive <- (parms$inputs * (1-parms$input_to_fast - parms$input_to_slow) +
-                   y[1] / parms$turnoverTime_fast * parms$fast_to_passive +
-                   y[2] / parms$turnoverTime_slow * parms$slow_to_passive ) - 
-    y[3]/parms$turnoverTime_passive
-  
-  return(list(c(C_fast = dC_fast,
-           C_slow = dC_slow,
-           C_passive = dC_passive)))
-}
-
-
-
-
-# sim_3cascadereduction <- #*need to code this up*
+# decay_matrix <- diag(c(1/parameter.ls$turnoverTime_fast, 1/parameter.ls$turnoverTime_slow, 1/parameter.ls$turnoverTime_passive))
 # 
-# sim_Cas_OnePoolProxy <- sim_3cascade_reduction%>%
-#   pivot_wider(names_from="pool", values_from="stock") %>%
-#   mutate(C_Total = C_fast + C_slow +C_passive) %>%
-#   mutate(One_pool_proxy = Ind_SS[1] + C_slow + Ind_SS[3]*0.8) %>%
-#   select(time, C_Total, One_pool_proxy) #%>%
-# #  filter(time > 9) %>%
-# #  filter(time <100)
-
+# allocation_matrix <- matrix(c(1, 0, 0,
+#                               -parameter.ls$fast_to_slow, 1, 0, 
+#                               -parameter.ls$fast_to_passive, -parameter.ls$slow_to_passive, 1), 
+#                       ncol = 3, byrow=TRUE)
+# 
+# comp_matrix <- decay_matrix %*% allocation_matrix
+# 
+# adjustment_matrix <- eigen(comp_matrix)$vectors
+# 
+# new_decay_rates <- diag(eigen(comp_matrix)$values)
+# 
+# #comp_matrix == adjustment_matrix %*% new_decay_rates %*% solve(adjustment_matrix)
+# 
+# 
+# ##from above
+# 
+# 
+# dCdt_3cascade <- function(t, y, parms){
+#   
+#   decay_allo_matrix <- matrix(data= c( parms$))
+#   
+#   
+#   dC_fast <- (parms$inputs *parms$input_to_fast) -
+#     y[1]/parms$turnoverTime_fast
+#   
+#   dC_slow <- (parms$inputs * parms$input_to_slow +
+#                 y[1] / parms$turnoverTime_fast * parms$fast_to_slow)- 
+#     y[2]/parms$turnoverTime_slow
+#   
+#   dC_passive <- (parms$inputs * (1-parms$input_to_fast - parms$input_to_slow) +
+#                    y[1] / parms$turnoverTime_fast * parms$fast_to_passive +
+#                    y[2] / parms$turnoverTime_slow * parms$slow_to_passive ) - 
+#     y[3]/parms$turnoverTime_passive
+#   
+#   return(list(c(C_fast = dC_fast,
+#            C_slow = dC_slow,
+#            C_passive = dC_passive)))
+# }
+# 
+# 
+# 
+# 
+# # sim_3cascadereduction <- #*need to code this up*
+# # 
+# # sim_Cas_OnePoolProxy <- sim_3cascade_reduction%>%
+# #   pivot_wider(names_from="pool", values_from="stock") %>%
+# #   mutate(C_Total = C_fast + C_slow +C_passive) %>%
+# #   mutate(One_pool_proxy = Ind_SS[1] + C_slow + Ind_SS[3]*0.8) %>%
+# #   select(time, C_Total, One_pool_proxy) #%>%
+# # #  filter(time > 9) %>%
+# # #  filter(time <100)
+# 
 
 ```
 
@@ -890,7 +890,7 @@ seasonal_inputs_model_comparison <- as.data.frame(cbind(seasonal_sim_3feedback$t
 
 ggplot(seasonal_inputs_model_comparison)  +
   geom_line(aes(x=time, y=stock, color=model)) +
-  labs(title="Seasonal Variation over 5 Years", y="Total Carbon (kg C/(m^2 yr))", x="Time (in months)" )
+  labs(title="Seasonal Variation over 5 Years", y="Total Carbon (kg C/(m^2))", x="Time (in months)" )
 
 
 
