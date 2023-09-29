@@ -55,8 +55,22 @@ simTime <- 100*12
 
 #rate change function
 dCdt_1pool <- function(t, y, parms){
-  ans <- parms$inputs - y / parms$turnoverTime
-  return(list(ans))
+  ## Debugging code below
+  #t <- 0
+  #y <- c(G = 0, InitialCarbon_1pool)
+  #parms <- parameter.ls
+  y <- unname(y)
+  CO2 <- y[1] 
+  soil <- y[2]
+  
+  dCO2 <- soil / parms$turnoverTime
+  dSoil <- parms$inputs - soil / parms$turnoverTime
+  
+  #make a relative tolernance to ensure conservation of mass
+  if(abs(parms$inputs - (dCO2 + dSoil))/parms$inputs > 1e-8){
+    stop('Conservation of mass does not hold')
+  }
+  return(list(c(G = dCO2, C = dSoil)))
 }
 
 #steady state function
@@ -65,19 +79,24 @@ C_ss_1pool <- function(parms){
   return(c(C = ans))
 }
 
-InitialCarbon_1pool <- C_ss_1pool(parms = parameter.ls)*0.7  %>% setNames("C")
+InitialCarbon_1pool <- C_ss_1pool(parms = parameter.ls)*0.7
+
+dCdt_1pool(t = 0, y = c(G = 0, InitialCarbon_1pool), parms = parameter.ls)
 
 # Numerically solving this is a little bit overkill since 
 # ...the differential equation is solvable but for generalizations here is the numerical
 # ...solution from the function lsoda in the deSolve package
-sim_1pool <- lsoda(y = InitialCarbon_1pool,
-                times = 0:simTime,
+sim_1pool <- lsoda(y = c(G = 0, InitialCarbon_1pool),
+                times = seq(0, simTime, by = 1/10),
                 func = dCdt_1pool,
                 parms = parameter.ls) %>%
-  as.data.frame() 
+  as.data.frame()
 
-ggplot(sim_1pool) +
-  geom_line(aes(x=time, y=C))
+ggplot(sim_1pool %>%
+         pivot_longer(cols = c(C, G), names_to = 'pool', values_to = 'mass')) +
+  geom_line(aes(x=time, y=mass)) +
+  facet_wrap(~pool, scales='free', ncol = 1)
+
 ```
 Tracking carbon stocks in soil is important to understanding how much carbon could be sequestered, and helps to answer questions around whether soil could serve as a carbon sink or as a source across diverse ecosystems as our climate changes.
 Another important metric we will be considering is how much CO$_2$ is respired over a certain period of time.
@@ -106,7 +125,7 @@ $$G(T) = \int_0^T k\left( \frac{u}{k} - \left(\frac{u}{k}-C_0\right)e^{-kt}\righ
 Let's apply this to our simulation above.
 
 ```{r}
-
+##DELET ME :D
 RespiredCarbon <- function(endtime, parms, initialstate) {
   G = parms$inputs*endtime +
       ((parms$inputs - initialstate/parms$turnoverTime)/parms$turnoverTime)*(1-exp(-endtime/parms$turnoverTime))
@@ -115,7 +134,9 @@ RespiredCarbon <- function(endtime, parms, initialstate) {
 
 sim_1pool <- sim_1pool %>% 
   mutate(RespiredC = RespiredCarbon(endtime=time, parms=parameter.ls, initialstate=InitialCarbon_1pool) ) %>%
-  as.data.frame()
+  mutate(cumulativeInputs = time * parameter.ls$inputs) %>%
+  as.data.frame() %>%
+  mutate(balanceC = C[1] + cumulativeInputs - (RespiredC + C))
 
  ggplot(sim_1pool) +
   geom_line(aes(x=time, y=C)) +
@@ -193,7 +214,8 @@ C_ss_3feedback <- function(parms){
 
 #ODE equation
 dCdt_3feedback <- function(t, y, parms){
- pools <- matrix(y[1:3], nrow=3)
+  G <- y[1]
+ pools <- matrix(y[2:4], nrow=3)
  allocation_matrix <- matrix(c(parms$input_to_fast, 
                                 parms$input_to_slow, 
                                 1 - parms$input_to_fast - parms$input_to_slow),
@@ -208,6 +230,8 @@ dCdt_3feedback <- function(t, y, parms){
                             byrow=TRUE)
   ans <- parms$inputs * allocation_matrix - decay_matrix %*% transfer_matrix %*% pools
   
+  resp <- decay_matrix %*% transfer_matrix %*% pools
+  total_resp <- sum(resp)
   
   ##TRYING TO ADD RESPIRATION HERE AND IT AIN'T WORKIN##
 
@@ -216,11 +240,11 @@ dCdt_3feedback <- function(t, y, parms){
   #         parms$turnoverTime_slow*(1- parms$slow_to_fast - parms$slow_to_passive)*ans[2]  +
   #         parms$turnoverTime_passsive*(1- parms$passive_to_fast - parms$passive_to_slow)*ans[3] 
   
-  return(list(c(C_fast = ans[1],
-           C_slow = ans[2],
-           C_passive = ans[3]#,
-           #Resp_C = dgasdt
-           )))
+  return(list(c(G = total_resp,
+                C_fast = ans[1],
+                C_slow = ans[2],
+                C_passive = ans[3]
+  )))
 }
 
 
@@ -228,26 +252,30 @@ dCdt_3feedback <- function(t, y, parms){
 InitialCarbon_3pool <- C_ss_3feedback(parms = century_parameter.ls)*0.6
 
 #making a more realistic simulation time for a monthly model with turnover times in the 1000s
-simTime=1000*12
+simTime <- 1000*12
 
 #simulation
-sim_3feedback <- lsoda(y = InitialCarbon_3pool,
+sim_3feedback <- lsoda(y = c(G=0, InitialCarbon_3pool),
                       times = 0:simTime,
                       func = dCdt_3feedback,
                       parms = century_parameter.ls) %>%
-  as.data.frame() %>%
-  pivot_longer(cols = C_fast:C_passive,
-               names_to = 'pool',
-               values_to = 'stock')%>%
-  mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
-         model = '3feedback')
+  as.data.frame() #%>%
+  #pivot_longer(cols = C_fast:C_passive,
+   #            names_to = 'pool',
+   #            values_to = 'stock')%>%
+  #mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
+  #       model = '3feedback')
 
 #Feedback graph by pools:
-ggplot(sim_3feedback #%>%
-         #bind_rows(sim_3cascade, sim_3independent)
-       ) +
+ggplot(sim_3feedback %>%
+         pivot_longer(cols = C_fast:C_passive,
+                      names_to = 'pool',
+                      values_to = 'stock')%>%
+         mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
+                model = '3feedback')
+) +
   geom_line(aes(x=time, y=stock, color = model)) +
-  facet_wrap(~ pool)
+  facet_wrap(~ pool, ncol=1, scales='free')
 
 ```
 
@@ -281,36 +309,53 @@ century_parameter.ls$turnoverTime <- Proxy_decayrate(parms=century_parameter.ls)
 
 
 #Initial Value for the One Pool Proxy, simulation, with name for lsoda output
-InitialCarbon_1pool <- sum(C_ss_3feedback(parms = century_parameter.ls))*0.6 %>% setNames("C")
+InitialCarbon_1pool <- sum(C_ss_3feedback(parms = century_parameter.ls))*0.6
 
 #Simulation with the one-pool model
-sim_Feedback_OnePool <- lsoda(y = InitialCarbon_1pool,
+sim_Feedback_OnePool <- lsoda(y = c(G=0, C_one = InitialCarbon_1pool),
                 times = 0:simTime,
                 func = dCdt_1pool,
                 parms = century_parameter.ls) %>%
   as.data.frame()
 
 
-#Calculating total C in the Feedback run
-sim_3feedback <- sim_3feedback %>%
-  pivot_wider(names_from="pool", values_from="stock") %>%
-  mutate(Feedback_C_Total = C_fast + C_slow +C_passive) 
+sim_all <- sim_3feedback %>%
+  full_join(sim_Feedback_OnePool, by = 'time', suffix = c('.3pool', '.proxy')) %>%
+  mutate(flux_3pool = dCdt_3feedback(t = time, y = c(0, C_fast, C_slow, C_passive),
+                                     parms = century_parameter.ls)[[1]][1], 
+         flux_proxy = dCdt_1pool(t = time, y = c(0, C_one),
+                                     parms = century_parameter.ls)[[1]][1], .by= everything())
 
-#Add the one-pool proxy column
-sim_3feedback$OnePoolProxy <- sim_Feedback_OnePool$C
+#want time vs stock graph
+#difference drive graph
+ggplot(sim_all) +
+  geom_point(aes(x=C_fast+C_slow+C_passive, y = C_one)) +
+  geom_abline()
 
+ggplot(sim_all) +
+  geom_line(aes(x=time, y= C_one), color = 'blue') +
+  geom_line(aes(x=time, y = C_fast+C_slow+C_passive))
 
-#Formatting the data for nice graphing:
-sim_3feedback <- sim_3feedback %>% 
-                    select(time, Feedback_C_Total, OnePoolProxy) %>%
-                    pivot_longer(cols = c("Feedback_C_Total", "OnePoolProxy"),
-                                 names_to = "model",
-                                 values_to = "stock")
-
-
-#Plot comparing the two
-ggplot(sim_3feedback) +
-  geom_line(aes(x=time, y=stock, color=model))
+# #Calculating total C in the Feedback run
+# sim_3feedback <- sim_3feedback %>%
+#   pivot_wider(names_from="pool", values_from="stock") %>%
+#   mutate(Feedback_C_Total = C_fast + C_slow +C_passive) 
+# 
+# #Add the one-pool proxy column
+# sim_3feedback$OnePoolProxy <- sim_Feedback_OnePool$C
+# 
+# 
+# #Formatting the data for nice graphing:
+# sim_3feedback <- sim_3feedback %>% 
+#                     select(time, Feedback_C_Total, OnePoolProxy) %>%
+#                     pivot_longer(cols = c("Feedback_C_Total", "OnePoolProxy"),
+#                                  names_to = "model",
+#                                  values_to = "stock")
+# 
+# 
+# #Plot comparing the two
+# ggplot(sim_3feedback) +
+#   geom_line(aes(x=time, y=stock, color=model))
 
 
 ```
@@ -445,7 +490,7 @@ NPP changes on diurnal, seasonal, and even longer-term cycles. When inputs are f
 
 ```{r InputsFlux}
 #Function for simulation with the 3feedback model, adjusting the inputs for seasonal change
-dCdt_seasonal_3feedback <- function(t, y, parms){
+dCdt_seasonal_3feedback <- function(t, y, parms, input_type = 'seasonal' ){
   pools <- matrix(y, nrow=3)
   allocation_matrix <- matrix(c(parms$input_to_fast, 
                                 parms$input_to_slow, 
@@ -462,13 +507,17 @@ dCdt_seasonal_3feedback <- function(t, y, parms){
   #dcdt = inputs * allocation + transfer_matrix %*% decay_matrix %*% y
   #decay_matrix %*% transfer_matrix %*% y = - inputs * allocation
   
-  flux_input <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300)
+  if(input_type == 'seasonal'){
+    flux_input <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300) #offset by the parms$input parameter
+  }else{
+    flux_input <- parms$inputs
+  }
   
   ans <- flux_input * allocation_matrix - decay_matrix %*% transfer_matrix %*% y
-  
+  ##check conservation of mass
   return(list(c(C_fast = ans[1],
            C_slow = ans[2],
-           C_passive = ans[3])))
+           C_passive = ans[3]))) #add in CO2 pool
 }
 
 
