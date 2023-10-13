@@ -54,7 +54,7 @@ parameter.ls <- list(inputs = 0.2/12,
 simTime <- 100*12
 
 #rate change function
-dCdt_1pool <- function(t, y, parms){
+dCdt_1pool <- function(t, y, parms, rel_tol = 1e-8){
   ## Debugging code below
   #t <- 0
   #y <- c(G = 0, InitialCarbon_1pool)
@@ -67,7 +67,7 @@ dCdt_1pool <- function(t, y, parms){
   dSoil <- parms$inputs - soil / parms$turnoverTime
   
   #make a relative tolernance to ensure conservation of mass
-  if(abs(parms$inputs - (dCO2 + dSoil))/parms$inputs > 1e-8){
+  if(abs(parms$inputs - (dCO2 + dSoil))/parms$inputs > rel_tol){
     stop('Conservation of mass does not hold')
   }
   return(list(c(G = dCO2, C = dSoil)))
@@ -90,10 +90,15 @@ sim_1pool <- lsoda(y = c(G = 0, InitialCarbon_1pool),
                 times = seq(0, simTime, by = 1/10),
                 func = dCdt_1pool,
                 parms = parameter.ls) %>%
-  as.data.frame()
+  as.data.frame() %>%
+  mutate(dCO2 = dCdt_1pool(t = time, #this doesn't matter for this current model
+                           y = c(G = G, C=C), 
+                           parms = parameter.ls)[[1]]['G'],
+         .by = everything())
 
 ggplot(sim_1pool %>%
-         pivot_longer(cols = c(C, G), names_to = 'pool', values_to = 'mass')) +
+         pivot_longer(cols = c(C, G, dCO2), 
+                      names_to = 'pool', values_to = 'mass')) +
   geom_line(aes(x=time, y=mass)) +
   facet_wrap(~pool, scales='free', ncol = 1)
 
