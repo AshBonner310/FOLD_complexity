@@ -46,7 +46,7 @@ which is a MUCH larger range of turnover times.
 So this would be consistent with the observations but maybe not constraining of the parameters.
 
 ```{r}
- #u; [0, 2.5] kg-carbon m-2 yr-1; evenly split per month for now
+ #u; [0, 2.5] kg-carbon m-2 yr-1; evenly split per month for now (fits CENTURY parameters)
 parameter.ls <- list(inputs = 0.2/12, 
                      #\tau; [10, 50] yr, by month
                      turnoverTime = 15*12) 
@@ -102,54 +102,10 @@ Tracking carbon stocks in soil is important to understanding how much carbon cou
 Another important metric we will be considering is how much CO$_2$ is respired over a certain period of time.
 This largely depends on where the model starts, but discussing the basics here seems pertinent.
 
-At any point in time, the rate of gaseous CO$_2$ respired from the soil is
-
-$$\frac{dG}{dt} = kC$$
-
-and the total CO$_2$ respired from time $t=0$ to $t=T$ is
-
-$$G(t) = \int_0^T kC(t) dt$$
-
-This gives us good motivation to solve the seperable ordinary differential equation for the one-pool model above.
-
-$$\frac{dC}{dt} = u - kC \implies C(t) = \frac{u}{k} - Ae^{-kt} $$
-
-where $A$ is a stand-in for some constant.
-We can find this constant by calling the initial value of the system $C_0$, such that $C(t=0)=C_0$.
-
-$$C(0)=C_0 = \frac{u}{k} - Ae^k(0) = \frac{u}{k}-A \implies A= \frac{u}{k}-C_0$$
-
-This means we can develop an expression for how much gaseous CO$_2$ has respired from the soil:
-
-$$G(T) = \int_0^T k\left( \frac{u}{k} - \left(\frac{u}{k}-C_0\right)e^{-kt}\right) dt = uT + k \left( u-kC_0 \right)\left(1-e^{-kT}\right)$$
-Let's apply this to our simulation above.
-
-```{r}
-##DELET ME :D
-RespiredCarbon <- function(endtime, parms, initialstate) {
-  G = parms$inputs*endtime +
-      ((parms$inputs - initialstate/parms$turnoverTime)/parms$turnoverTime)*(1-exp(-endtime/parms$turnoverTime))
-  return(G)
-}
-
-sim_1pool <- sim_1pool %>% 
-  mutate(RespiredC = RespiredCarbon(endtime=time, parms=parameter.ls, initialstate=InitialCarbon_1pool) ) %>%
-  mutate(cumulativeInputs = time * parameter.ls$inputs) %>%
-  as.data.frame() %>%
-  mutate(balanceC = C[1] + cumulativeInputs - (RespiredC + C))
-
- ggplot(sim_1pool) +
-  geom_line(aes(x=time, y=C)) +
-  geom_area(aes(x=time, y=RespiredC), alpha=0.5)
-
-
-
-```
-
 
 #The three-pool feedback model
 
-Model description goes here!
+Three pools for differing decay rates, with monthly timesteps for century parametrization.
 
 ```{r}
 
@@ -232,13 +188,6 @@ dCdt_3feedback <- function(t, y, parms){
   
   resp <- decay_matrix %*% transfer_matrix %*% pools
   total_resp <- sum(resp)
-  
-  ##TRYING TO ADD RESPIRATION HERE AND IT AIN'T WORKIN##
-
-  
-  # dgasdt <- parms$turnoverTime_fast*(1- parms$fast_to_slow - parms$fast_to_passive)*ans[1]  +
-  #         parms$turnoverTime_slow*(1- parms$slow_to_fast - parms$slow_to_passive)*ans[2]  +
-  #         parms$turnoverTime_passsive*(1- parms$passive_to_fast - parms$passive_to_slow)*ans[3] 
   
   return(list(c(G = total_resp,
                 C_fast = ans[1],
