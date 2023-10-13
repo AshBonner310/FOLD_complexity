@@ -105,7 +105,7 @@ This largely depends on where the model starts, but discussing the basics here s
 
 #The three-pool feedback model
 
-Three pools for differing decay rates, with monthly timesteps for century parametrization.
+Three pools for differing decay rates, with monthly timesteps for CENTURY parametrization.
 
 ```{r}
 
@@ -208,12 +208,8 @@ sim_3feedback <- lsoda(y = c(G=0, InitialCarbon_3pool),
                       times = 0:simTime,
                       func = dCdt_3feedback,
                       parms = century_parameter.ls) %>%
-  as.data.frame() #%>%
-  #pivot_longer(cols = C_fast:C_passive,
-   #            names_to = 'pool',
-   #            values_to = 'stock')%>%
-  #mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
-  #       model = '3feedback')
+  as.data.frame() 
+
 
 #Feedback graph by pools:
 ggplot(sim_3feedback %>%
@@ -225,6 +221,19 @@ ggplot(sim_3feedback %>%
 ) +
   geom_line(aes(x=time, y=stock, color = model)) +
   facet_wrap(~ pool, ncol=1, scales='free')
+
+
+#Feedback graphs: total carbon and respiration 
+ggplot(sim_3feedback %>%
+         pivot_longer(cols = C_fast:C_passive,
+                      names_to = 'pool',
+                      values_to = 'stock')%>%
+         mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
+                model = '3feedback')
+) +
+  geom_line(aes(x=time, y=stock, color = model)) +
+  facet_wrap(~ pool, ncol=1, scales='free')
+
 
 ```
 
