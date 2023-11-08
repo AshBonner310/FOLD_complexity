@@ -66,8 +66,9 @@ dCdt_1pool <- function(t, y, parms, rel_tol = 1e-8){
   dCO2 <- soil / parms$turnoverTime
   dSoil <- parms$inputs - soil / parms$turnoverTime
   
-  #make a relative tolernance to ensure conservation of mass
-  if(abs(parms$inputs - (dCO2 + dSoil))/parms$inputs > rel_tol){
+  #make a relative tolerance to ensure conservation of mass
+  #if(abs(parms$inputs - (dCO2 + dSoil))/parms$inputs > rel_tol){ #This is causing the no-inputs run to fail.
+  if(abs(parms$inputs - (dCO2 + dSoil)) > rel_tol){
     stop('Conservation of mass does not hold')
   }
   return(list(c(G = dCO2, C = dSoil)))
@@ -83,9 +84,7 @@ InitialCarbon_1pool <- C_ss_1pool(parms = parameter.ls)*0.7
 
 dCdt_1pool(t = 0, y = c(G = 0, InitialCarbon_1pool), parms = parameter.ls)
 
-# Numerically solving this is a little bit overkill since 
-# ...the differential equation is solvable but for generalizations here is the numerical
-# ...solution from the function lsoda in the deSolve package
+
 sim_1pool <- lsoda(y = c(G = 0, InitialCarbon_1pool),
                 times = seq(0, simTime, by = 1/10),
                 func = dCdt_1pool,
@@ -393,12 +392,13 @@ How does this aggregate decay rate compare to the full model when soil is remove
 no_input_century_parameter.ls <- century_parameter.ls %>% list_assign(inputs=0)
 
 #Creates a simulation using the full feedback model starting at SS, turn off inputs at time 240 (twenty years, monthly time steps)
-No_inputs_feedback_sim <- rbind(lsoda(y = C_ss_3feedback(parms = century_parameter.ls),
+No_inputs_feedback_sim <- rbind(lsoda(y = c(G=0, C_ss_3feedback(parms = century_parameter.ls)),
                                       times = 0:240,
                                       func = dCdt_3feedback,
                                       parms = century_parameter.ls) %>%
                                   as.data.frame(),
-                              lsoda(y = C_ss_3feedback(parms = century_parameter.ls),
+                              lsoda(y = c(G=4, C_ss_3feedback(parms = century_parameter.ls)),
+                                      #Tried this, it ran but it's clearly no giving me the right number for respiration integration, which I guess makes sense but I'm bummed about it: unlist(dCdt_3feedback(t=240,y=c(G=0, C_ss_3feedback(parms = century_parameter.ls)), parms = century_parameter.ls)), 
                                       times = 0:9760,
                                       func = dCdt_3feedback,
                                       parms = no_input_century_parameter.ls) %>%
@@ -408,42 +408,59 @@ No_inputs_feedback_sim <- rbind(lsoda(y = C_ss_3feedback(parms = century_paramet
                           mutate(Feedback_C_Total = C_fast + C_slow +C_passive) %>%
                           mutate(C_ps = C_passive + C_slow) %>%
                           as.data.frame
+
+#Highlighting the change in respiration
+ggplot(No_inputs_feedback_sim) +
+  geom_line(aes(x=time, y=G)) +
+  geom_vline(aes(xintercept=240), linetype=2) +
+  xlim(0,480) +
+  geom_abline(aes(intercept=0, slope=4/240), color='red', alpha=0.5)
                 
 
 
 #Simulation with the one-pool model starting at SS, turn off inputs at time 240 (twenty years, monthly time steps)
-No_inputs_one_pool_proxy_sim <- rbind(lsoda(y = sum(C_ss_3feedback(parms = century_parameter.ls)),
+No_inputs_one_pool_proxy_sim <- rbind(lsoda(y = c(0, sum(C_ss_3feedback(parms = century_parameter.ls))),
                                             times = 0:240,
                                             func = dCdt_1pool,
                                             parms = century_parameter.ls) %>%
                                        as.data.frame() %>%
-                                       set_names(c("time", "One_Pool_Proxy")),
+                                       set_names(c("time", "Respiration", "One_Pool_Proxy")),
                                       
-                                    lsoda(y = sum(C_ss_3feedback(parms = century_parameter.ls)),
+                                    lsoda(y = c(4, sum(C_ss_3feedback(parms = century_parameter.ls))),
                                             times = 0:9760,
                                             func = dCdt_1pool,
                                             parms = no_input_century_parameter.ls) %>%
                                       as.data.frame() %>%
-                                      set_names(c("time", "One_Pool_Proxy")) %>%
+                                      set_names(c("time", "Respiration", "One_Pool_Proxy")) %>%
                                       mutate(time=time+240)
                                 )
+
+ggplot(No_inputs_one_pool_proxy_sim) +
+  geom_line(aes(x=time, y=Respiration)) +
+  geom_vline(aes(xintercept=240), linetype=2) +
+  xlim(0,480) +
+  geom_abline(aes(intercept=0, slope=4/240), color='red', alpha=0.5)
+
+
 #Makes a dataframe to compare the two simulations total carbon
 no_input_model_comparison <- as.data.frame(cbind(No_inputs_feedback_sim$time, No_inputs_feedback_sim$Feedback_C_Total, No_inputs_one_pool_proxy_sim$One_Pool_Proxy)) %>% 
-    set_names(c("time", "Feedback_C_Total", "One_Pool_Proxy")) %>%
-    pivot_longer(cols = c("Feedback_C_Total", "One_Pool_Proxy"),
+    set_names(c("time", "Feedback_C_Total", "One_Pool_Proxy"))
+
+ggplot(no_input_model_comparison) +
+  geom_point(aes(x=Feedback_C_Total, y=One_Pool_Proxy)) +
+  geom_abline()
+
+
+
+ggplot(no_input_model_comparison %>% pivot_longer(cols = c("Feedback_C_Total", "One_Pool_Proxy"),
                                  names_to = "model",
-                                 values_to = "stock")
-
-
-
-ggplot(no_input_model_comparison)  +
+                                 values_to = "stock"))  +
   # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=C_passive), alpha=0.1, fill="firebrick")+
   # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=C_ps), alpha=0.1, fill="firebrick")+
   # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=Feedback_C_Total), alpha=0.1, fill="firebrick")+
   geom_line(aes(x=time, y=stock, color=model)) +
   geom_vline(xintercept=240, alpha=0.5, linetype="dashed") +
   labs(title="Inputs cut off after 20 years", y="Total Carbon (kg C/(m^2 yr))", x="Time (in months)" )
-
 
 
 ```
