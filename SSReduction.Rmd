@@ -3,6 +3,8 @@ title: "Steady State Reduction"
 author: "Ashley Bonner"
 date: "`r Sys.Date()`"
 output: html_document
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -11,6 +13,7 @@ output: html_document
 library(tidyverse) #data library
 library(deSolve) #ODE solver
 library(DiagrammeR) #flow charts
+library(patchwork) #cool figure arrangment
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -27,21 +30,21 @@ $\frac{dC}{dt} = u - kC$
 where 
 
   + $C$ is the carbon stock [mass per area]. This is often on the order of 1 to 150 kg-organic-carbon m^-2^ for the first meter of soil (HWSD2)
-  + $u$ is the inputs into the soil [mass per area per time]. Between root exodase, root turnover, and surface litter, inputs are difficult to quantify directly. However net primary productivity is often used as a proxy for soil inputs and varies between 0 to 2.5 kg-organic-carbon m^-2^ yr^-1^ with the geographic mode occurring around 0.2 kg-C m^-2^ yr^-1^ (MODIS - MOD17A3)
+  + $u$ is the inputs into the soil [mass per area per time]. Between root exodase, root turnover, and surface litter, inputs are difficult to quantify directly. However net primary productivity is often used as a proxy for soil inputs and varies between 0 to 2.5 kg-organic-carbon m^-2^ yr^-1^ with the geographic mode occurring around 0.2 kg-C m^-2^ yr^-1 (MODIS - MOD17A3)
   + $k$ is the decay rate is the fraction of carbon leaving the soil carbon pool per time. This is often framed as it's inverse, turnover time ($k=\frac{1}{\tau}$) which has many interpretation but for this model is the average length of time a carbon atom will spend in the soil. The bulk turnover time in Earth system models is on the order of 10 to 50 years (CMIP5 and CMIP6).
   
-From this model we can calculate the steady state value where the rate of change is zero.
+From this model we can calculate the steady state value, where the rate of change is zero.
 This describes the carbon stock that the system is trending towards as it matures.
 
-$C_{ss} = \frac{u}{k} = u k^{-1}$
+$C_{ss} = \frac{u}{k} = u k^{-1} = u\tau$
 
 This also gives us a useful check on our ranges if we assume that soil carbon stocks are generally close to steady state. 
-$u\tau = [0, 0.2, 2.5] [10, 15, 50] = [0, 3, 125] $
-This is reassuring! 
-It's very very close to the stated ranges for the soil carbon stocks of $[1,150]$.
+$u\tau = [0, 0.2, 2.5] [10, 15, 50] = [0, 3, 125]$
+
+It's very very close to the stated ranges for the soil carbon stocks of $[1,150] \frac{kg-C}{m^2 yr^1}$.
 
 We can also look at the inputs and carbon stocks to infer the turnover times.
-$\frac{C}{u} = \frac{[1, 150]}{[[0.1, 2.5]]} = [0.4, 1500]$
+$\frac{C}{u} \left( \frac{kgC/m^2}{kgC/m^2yr }\right)= \frac{[1, 150]}{[0.1, 2.5]} = [0.4, 1500] \left( yr \right)$
 which is a MUCH larger range of turnover times.
 So this would be consistent with the observations but maybe not constraining of the parameters.
 
@@ -67,11 +70,14 @@ dCdt_1pool <- function(t, y, parms, rel_tol = 1e-8){
   dSoil <- parms$inputs - soil / parms$turnoverTime
   
   #make a relative tolerance to ensure conservation of mass
-  #if(abs(parms$inputs - (dCO2 + dSoil))/parms$inputs > rel_tol){ #This is causing the no-inputs run to fail.
-  if(abs(parms$inputs - (dCO2 + dSoil)) > rel_tol){
-    stop('Conservation of mass does not hold')
+  if(parms$inputs != 0){ 
+    #need this to keep the no-inputs simulation running
+    if(abs(parms$inputs - (dCO2 + dSoil))/parms$inputs > rel_tol){ 
+      #relative tolerance allowance
+        stop('Conservation of mass does not hold')
+    }
   }
-  return(list(c(G = dCO2, C = dSoil)))
+  return(list(c(G = dCO2, C_total = dSoil)))
 }
 
 #steady state function
@@ -172,7 +178,7 @@ C_ss_3feedback <- function(parms){
 }
 
 
-#ODE equation
+#ODE for a three-pool FOLD model
 dCdt_3feedback <- function(t, y, parms){
   G <- y[1]
  pools <- matrix(y[2:4], nrow=3)
@@ -202,21 +208,24 @@ dCdt_3feedback <- function(t, y, parms){
 
 
 #initial value
-InitialCarbon_3pool <- C_ss_3feedback(parms = century_parameter.ls)*0.6
+InitialCarbon_3pool <- C_ss_3feedback(parms = century_parameter.ls)*0.75
 
 #making a more realistic simulation time for a monthly model with turnover times in the 1000s
 simTime <- 1000*12
 
 #simulation
-sim_3feedback <- lsoda(y = c(G=0, InitialCarbon_3pool),
+sim_Century <- lsoda(y = c(G=0, 
+                              #C_fast = 0, C_slow = 0, C_passive =0), #use for full range of carbon stocks comparison?
+                              InitialCarbon_3pool),
                       times = 0:simTime,
                       func = dCdt_3feedback,
                       parms = century_parameter.ls) %>%
-  as.data.frame() 
+                  as.data.frame() %>%
+                  mutate(C_total = C_fast + C_slow +C_passive) 
 
 
 #Feedback graph by pools:
-ggplot(sim_3feedback %>%
+ggplot(sim_Century %>%
          pivot_longer(cols = C_fast:C_passive,
                       names_to = 'pool',
                       values_to = 'stock')%>%
@@ -228,7 +237,7 @@ ggplot(sim_3feedback %>%
 
 
 #Feedback graphs: total carbon and respiration 
-ggplot(sim_3feedback %>%
+ggplot(sim_Century %>%
          pivot_longer(cols = C_fast:C_passive,
                       names_to = 'pool',
                       values_to = 'stock')%>%
@@ -246,231 +255,254 @@ ggplot(sim_3feedback %>%
 
 #Proxy Decay Rate Calculation
 Proxy_decayrate <- function(parms){
-  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+    decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
                              parms$turnoverTime_slow,
                              parms$turnoverTime_passive))
   
-  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+    transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
                               -parms$fast_to_slow, 1, -parms$passive_to_slow,
                               -parms$fast_to_passive, -parms$slow_to_passive,  1),
                             nrow = 3,
                             byrow=TRUE)
   
-   allocation_vector <- matrix(c(parms$input_to_fast, 
+    allocation_vector <- matrix(c(parms$input_to_fast, 
                                 parms$input_to_slow, 
                                 1 - parms$input_to_fast - parms$input_to_slow),
                               nrow = 3)
   
-  ans <- sum(solve(decay_matrix %*% transfer_matrix) %*% allocation_vector)
+    ans <- sum(solve(decay_matrix %*% transfer_matrix) %*% allocation_vector)
+    
   return(ans)
 }  
-
 
 ##Adds the proxy rate to the main parameter list
 century_parameter.ls$turnoverTime <- Proxy_decayrate(parms=century_parameter.ls)
 
 
 #Initial Value for the One Pool Proxy, simulation, with name for lsoda output
-InitialCarbon_1pool <- sum(C_ss_3feedback(parms = century_parameter.ls))*0.6
+InitialCarbon_1pool <- sum(C_ss_3feedback(parms = century_parameter.ls))*0.75
 
 #Simulation with the one-pool model
-sim_Feedback_OnePool <- lsoda(y = c(G=0, C_one = InitialCarbon_1pool),
-                times = 0:simTime,
-                func = dCdt_1pool,
-                parms = century_parameter.ls) %>%
-  as.data.frame()
+sim_Proxy <- lsoda(y = c(G=0, 
+                                    #C_total = 0), #use for full range of carbon stocks comparison?
+                                    C_total = InitialCarbon_1pool),
+                                    times = 0:simTime,
+                                    func = dCdt_1pool,
+                                    parms = century_parameter.ls) %>%
+                          as.data.frame() 
 
 
-sim_all <- sim_3feedback %>%
-  full_join(sim_Feedback_OnePool, by = 'time', suffix = c('.3pool', '.proxy')) %>%
+sim_all <- sim_Century %>%
+  full_join(sim_Proxy, by = 'time', suffix = c('.3pool', '.proxy')) %>%
   mutate(flux_3pool = dCdt_3feedback(t = time, y = c(0, C_fast, C_slow, C_passive),
-                                     parms = century_parameter.ls)[[1]][1], 
-         flux_proxy = dCdt_1pool(t = time, y = c(0, C_one),
+                                     parms = century_parameter.ls)[[1]][1],
+         flux_proxy = dCdt_1pool(t = time, y = c(0, C_total.proxy),
                                      parms = century_parameter.ls)[[1]][1], .by= everything())
 
-#want time vs stock graph
+
 #difference drive graph
 ggplot(sim_all) +
-  geom_point(aes(x=C_fast+C_slow+C_passive, y = C_one)) +
-  geom_abline()
+  geom_point(aes(x=C_fast+C_slow+C_passive, y = C_total.proxy)) +
+  geom_abline()+
+  labs(title="Total SOC Stocks Between the Models", y="One-Pool with Proxy Decay Rate", x="Three-Pool First-Order Linear Decay")
 
+#Total SOC over time
 ggplot(sim_all) +
-  geom_line(aes(x=time, y= C_one), color = 'blue') +
-  geom_line(aes(x=time, y = C_fast+C_slow+C_passive))
+  geom_line(aes(x=time/12, y= C_total.proxy), color = "#0021A5") +
+  geom_line(aes(x=time/12, y = C_fast+C_slow+C_passive), color = "#FA4616") +
+  labs(title="Total Soil Organic Carbon Stock", y="Total Soil Organic Carbon Stocks (kg C / m^2)", x="Time (yrs)")+
+  xlim(0,200)
 
-# #Calculating total C in the Feedback run
-# sim_3feedback <- sim_3feedback %>%
-#   pivot_wider(names_from="pool", values_from="stock") %>%
-#   mutate(Feedback_C_Total = C_fast + C_slow +C_passive) 
-# 
-# #Add the one-pool proxy column
-# sim_3feedback$OnePoolProxy <- sim_Feedback_OnePool$C
-# 
-# 
-# #Formatting the data for nice graphing:
-# sim_3feedback <- sim_3feedback %>% 
-#                     select(time, Feedback_C_Total, OnePoolProxy) %>%
-#                     pivot_longer(cols = c("Feedback_C_Total", "OnePoolProxy"),
-#                                  names_to = "model",
-#                                  values_to = "stock")
-# 
-# 
-# #Plot comparing the two
-# ggplot(sim_3feedback) +
-#   geom_line(aes(x=time, y=stock, color=model))
+  #notes for colors: (Gator Colors)
+  #+ scale_color_manual(values=c("#FA4616", "#0021A5")) 
+
+
+#Some data cleaning for graph matching the no-inputs comparison below
+sim_Proxy <- sim_Proxy %>%  mutate(model="Proxy") %>%
+                            mutate(dCO2dt = dCdt_1pool(t=NA, y=c(G=0, C_total), parms= century_parameter.ls)[[1]]["G"], .by=everything() )
+
+sim_Century <- sim_Century %>% 
+                  mutate(model="Century") %>%
+                  mutate(dCO2dt = dCdt_3feedback(t=NA, y=c(G=0,C_fast, C_slow, C_passive), parms= century_parameter.ls)[[1]]["G"], .by=everything() )
+
+
+model_comparison.sim <-  bind_rows(sim_Century, sim_Proxy)
+
+ggplot(model_comparison.sim) +
+  geom_line(aes(x=time/12, y=dCO2dt*12, color=model)) +
+  xlim(0,250) +
+  geom_ribbon(aes(x=time/12, ymax=dCO2dt*1.1*12, ymin=dCO2dt*0.9*12, fill=model), alpha=0.1)+
+  labs(title="Carbon dioxide flux from soil over time", 
+       subtitle = "starting at a fraction of steady state",
+       y="CO2 flux (kg C/(m^2 yr))", 
+       x="Time since carbon inputs removed (yr)",
+       color = "Model", fill = "Model") +
+  theme(
+    legend.position = c(0.1, 0.1),
+    legend.justification = c("left", "bottom"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)) +
+  scale_fill_manual(values=c("#FA4616", "#0021A5")) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) 
+
+
+ggplot(model_comparison.sim) +
+  geom_line(aes(x=time/12, y=C_total, color=model)) +
+  xlim(0,250) +
+  geom_ribbon(aes(x=time/12, ymax=C_total*1.1, ymin=C_total*0.9, fill=model), alpha=0.1)+
+  labs(title="Soil Organic Carbon Stocks over time", 
+       subtitle = "starting at a fraction of steady state",
+       y="Total Soil Organic Carbon Stocks (kg C/(m^2 yr))", 
+       x="Time since carbon inputs removed (yr)",
+       color = "Model", fill = "Model") +
+  theme(
+    legend.position = c(0.1, 0.1),
+    legend.justification = c("left", "bottom"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5) ) +
+  scale_fill_manual(values=c("#FA4616", "#0021A5")) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) 
+
+
 
 
 ```
-
-#Repsired Carbon
-
-Nothing wants to work :,)
-
-```{r RespiredC}
-# #ODE equation with Respired Carbon
-# dCdt_3feedback <- function(t, y, parms){
-# 
-#   dCf <- parms$inputs*parms$input_to_fast -
-#           (1/parms$turnoverTime_fast)*y[1] +
-#           (1/parms$turnoverTime_slow)*parms$slow_to_fast*y[2] +
-#           (1/parms$turnoverTime_passive)*parms$passive_to_fast*y[3]
-#     
-#   dCs <- parms$inputs*parms$input_to_slow -
-#           (1/parms$turnoverTime_slow)*y[2] +
-#           (1/parms$turnoverTime_fast)*parms$fast_to_slow*y[1] +
-#           (1/parms$turnoverTime_passive)*parms$passive_to_slow*y[3]
-#   
-#   dCp <- parms$inputs*(1-parms$input_to_fast- parms$input_to_slow) -
-#           (1/parms$turnoverTime_passive)*y[3] +
-#           (1/parms$turnoverTime_fast)*parms$fast_to_passive*y[1] +
-#           (1/parms$turnoverTime_slow)*parms$slow_to_passive*y[2]
-# 
-#   dgas <-  parms$turnoverTime_fast*(1- parms$fast_to_slow - parms$fast_to_passive)*y[1]  +
-#           parms$turnoverTime_slow*(1- parms$slow_to_fast - parms$slow_to_passive)*y[2]  +
-#           parms$turnoverTime_passsive*(1- parms$passive_to_fast - parms$passive_to_slow)*y[3]
-#   
-#   return(list(c(C_fast = dCf,
-#            C_slow = dCs,
-#            C_passive = dCp,
-#            Resp_C = dgas
-#            )))
-# }
-# 
-# #New Initial state with respired carbon column
-# InitialCarbon_3pool <- c(C_ss_3feedback(parms = century_parameter.ls)*0.6, "Gas"=0)
-# 
-# #simulation
-# sim_3feedback <- lsoda(y = InitialCarbon_3pool,
-#                       times = 0:simTime,
-#                       func = dCdt_3feedback,
-#                       parms = century_parameter.ls) %>%
-#   as.data.frame() %>%
-#   pivot_longer(cols = C_fast:C_passive,
-#                names_to = 'pool',
-#                values_to = 'stock')%>%
-#   mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
-#          model = '3feedback')
-# 
-# 
-# #Formatting data table for Respired C calculation (1pool)
-# sim_3feedback <- sim_3feedback %>% 
-#                     pivot_wider(names_from = "model", values_from = "stock") %>%
-#                     mutate(Proxy_Respired_C = RespiredCarbon(endtime=time, parms=century_parameter.ls, initialstate=InitialCarbon_1pool))
-# 
-# 
-# 
-
+```{r experimenting, eval=FALSE}
+ggplot(model_comparison.sim %>% mutate(dCO2dtfluxPercent = dCO2dt/C_total)) +
+  geom_line(aes(x=time/12, y=dCO2dtfluxPercent, color=model)) +
+  xlim(0,250) +
+  #geom_ribbon(aes(x=time/12, ymax=dCO2dt, ymin=dCO2dt, fill=model), alpha=0.1)+
+  labs(title="Carbon dioxide flux from soil over time AS A PERCENTAGE OF TOTAL SOIL STOCKS", 
+       subtitle = "starting at a fraction of steady state",
+       y="CO2 flux (kg C/(m^2 yr))", 
+       x="Time since carbon inputs removed (yr)",
+       color = "Model", fill = "Model") +
+  theme(
+    legend.position = c(0.1, 0.1),
+    legend.justification = c("left", "bottom"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)) +
+  scale_fill_manual(values=c("#FA4616", "#0021A5")) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) 
 ```
 
 
-## Inputs turned off
+
+## Simulating and Incubation experiment: Inputs turned off
 
 How does this aggregate decay rate compare to the full model when soil is removed from its environment, and no new organic carbon enters the system?
 
 ```{r InputsOff}
+#Times for lots of data points
+Simtimes <- seq(0,(12*100), by=0.2) #12 months times years of simulation
+
+
 #paramter list with no inputs
 no_input_century_parameter.ls <- century_parameter.ls %>% list_assign(inputs=0)
 
-#Creates a simulation using the full feedback model starting at SS, turn off inputs at time 240 (twenty years, monthly time steps)
-No_inputs_feedback_sim <- rbind(lsoda(y = c(G=0, C_ss_3feedback(parms = century_parameter.ls)),
-                                      times = 0:240,
-                                      func = dCdt_3feedback,
-                                      parms = century_parameter.ls) %>%
-                                  as.data.frame(),
-                              lsoda(y = c(G=4, C_ss_3feedback(parms = century_parameter.ls)),
-                                      #Tried this, it ran but it's clearly no giving me the right number for respiration integration, which I guess makes sense but I'm bummed about it: unlist(dCdt_3feedback(t=240,y=c(G=0, C_ss_3feedback(parms = century_parameter.ls)), parms = century_parameter.ls)), 
-                                      times = 0:9760,
+No_inputs_feedback_sim <- lsoda(y = c(G=0, C_ss_3feedback(parms = century_parameter.ls)),
+                                      times = Simtimes,
                                       func = dCdt_3feedback,
                                       parms = no_input_century_parameter.ls) %>%
                                   as.data.frame() %>%
-                                  mutate(time=time+240)
-                                ) %>%
-                          mutate(Feedback_C_Total = C_fast + C_slow +C_passive) %>%
-                          mutate(C_ps = C_passive + C_slow) %>%
-                          as.data.frame
-
-#Highlighting the change in respiration
-ggplot(No_inputs_feedback_sim) +
-  geom_line(aes(x=time, y=G)) +
-  geom_vline(aes(xintercept=240), linetype=2) +
-  xlim(0,480) +
-  geom_abline(aes(intercept=0, slope=4/240), color='red', alpha=0.5)
+                          mutate(C_total = C_fast + C_slow +C_passive) %>%
+                          mutate(model="Century") %>%
+                          mutate(dCO2dt = dCdt_3feedback(t=NA, y=c(G=0,C_fast, C_slow, C_passive), parms= no_input_century_parameter.ls)[[1]]["G"], .by=everything() )
                 
 
-
-#Simulation with the one-pool model starting at SS, turn off inputs at time 240 (twenty years, monthly time steps)
-No_inputs_one_pool_proxy_sim <- rbind(lsoda(y = c(0, sum(C_ss_3feedback(parms = century_parameter.ls))),
-                                            times = 0:240,
-                                            func = dCdt_1pool,
-                                            parms = century_parameter.ls) %>%
-                                       as.data.frame() %>%
-                                       set_names(c("time", "Respiration", "One_Pool_Proxy")),
-                                      
-                                    lsoda(y = c(4, sum(C_ss_3feedback(parms = century_parameter.ls))),
-                                            times = 0:9760,
-                                            func = dCdt_1pool,
-                                            parms = no_input_century_parameter.ls) %>%
-                                      as.data.frame() %>%
-                                      set_names(c("time", "Respiration", "One_Pool_Proxy")) %>%
-                                      mutate(time=time+240)
-                                )
-
-ggplot(No_inputs_one_pool_proxy_sim) +
-  geom_line(aes(x=time, y=Respiration)) +
-  geom_vline(aes(xintercept=240), linetype=2) +
-  xlim(0,480) +
-  geom_abline(aes(intercept=0, slope=4/240), color='red', alpha=0.5)
-
-
-#Makes a dataframe to compare the two simulations total carbon
-no_input_model_comparison <- as.data.frame(cbind(No_inputs_feedback_sim$time, No_inputs_feedback_sim$Feedback_C_Total, No_inputs_one_pool_proxy_sim$One_Pool_Proxy)) %>% 
-    set_names(c("time", "Feedback_C_Total", "One_Pool_Proxy"))
-
-ggplot(no_input_model_comparison) +
-  geom_point(aes(x=Feedback_C_Total, y=One_Pool_Proxy)) +
-  geom_abline()
+No_inputs_one_pool_proxy_sim <- lsoda(y = c(G=0, C_total=sum(C_ss_3feedback(parms = century_parameter.ls))),
+                                      times = Simtimes,
+                                      func = dCdt_1pool,
+                                      parms = no_input_century_parameter.ls) %>%
+                                  as.data.frame() %>%
+                          mutate(model="Proxy") %>%
+                          mutate(dCO2dt = dCdt_1pool(t=NA, y=c(G=0,C_total), parms= no_input_century_parameter.ls)[[1]]["G"], .by=everything() )
 
 
 
-ggplot(no_input_model_comparison %>% pivot_longer(cols = c("Feedback_C_Total", "One_Pool_Proxy"),
-                                 names_to = "model",
-                                 values_to = "stock"))  +
-  # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=C_passive), alpha=0.1, fill="firebrick")+
-  # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=C_ps), alpha=0.1, fill="firebrick")+
-  # geom_area(data=No_inputs_feedback_sim, aes(x=time, y=Feedback_C_Total), alpha=0.1, fill="firebrick")+
-  geom_line(aes(x=time, y=stock, color=model)) +
-  geom_vline(xintercept=240, alpha=0.5, linetype="dashed") +
-  labs(title="Inputs cut off after 20 years", y="Total Carbon (kg C/(m^2 yr))", x="Time (in months)" )
+no_input_model_comparison.sim <- bind_rows(No_inputs_feedback_sim, No_inputs_one_pool_proxy_sim)
+
+
+#Naming and creating the plot for later patchwork
+IncubationGas.plot <- ggplot(no_input_model_comparison.sim) +
+  geom_line(aes(x=time/12, y=dCO2dt*12, color=model, linetype=model)) +
+  xlim(0,3) 
+
+
+IncubationGas.plot +
+  xlim(0,100) +
+  labs(title="Incubation Simulation: CO2 flux",
+       subtitle = "Soil taken at steady state, removed from organic matter inputs",
+       y="CO2 flux (kg C/(m^2 yr))",
+       x="Time since carbon inputs removed (yr)",
+       color = "Model",
+       linetype = "Model"
+       ) +
+  theme(
+    legend.position = c(0.1, 0.1),
+    legend.justification = c("left", "bottom"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) # +
+  # # For "uncertainty" in the model; right now just a 10% demo
+  #geom_ribbon(aes(x=time/12, ymax=dCO2dt*1.1*12, ymin=dCO2dt*0.9*12, fill=model), alpha=0.1)+
+  #scale_fill_manual(values=c("#FA4616", "#0021A5")) 
+
+
+#Naming and creating the plot for later patchwork
+IncubationStocks.plot <- ggplot(no_input_model_comparison.sim) +
+  geom_line(aes(x=time/12, y=C_total, color=model, linetype=model)) +
+  xlim(0,3) 
+  
+
+#A graph to show off the simulation
+IncubationStocks.plot +
+  xlim(0,100) +
+  labs(title="Incubation Simulation: Soil Stocks",
+       subtitle = "Soil taken at steady state, removed from organic matter inputs",
+       y="Total Carbon Stocks (kg C/(m^2 yr))",
+       x="Time since carbon inputs removed (yr)",
+       color = "Model",
+       linetype = "Model"
+       ) +
+  theme(
+    legend.position = c(0.1, 0.1),
+    legend.justification = c("left", "bottom"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5) ) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) #+
+  # #For demo-ing uncertainty in the model
+  #geom_ribbon(aes(x=time/12, ymax=C_total*1.1, ymin=C_total*0.9, fill=model), alpha=0.1) +
+  #scale_fill_manual(values=c("#FA4616", "#0021A5")) +
 
 
 ```
+
+```{r Exp, eval=FALSE}
+ggplot(no_input_model_comparison.sim %>% mutate(dCO2dtfluxPercent = dCO2dt/C_total)) +
+  geom_line(aes(x=time/12, y=dCO2dtfluxPercent*100, color=model)) +
+  labs(title="Carbon dioxide flux from soil over time", 
+       subtitle = "a simulation of an incubation experiment",
+       y="CO2 flux, as a percentage of total SOC", 
+       x="Time since carbon inputs removed (yr)",
+       color = "Model", fill = "Model") +
+  theme(
+    legend.position = c(0.1, 0.1),
+    legend.justification = c("left", "bottom"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)) +
+  scale_fill_manual(values=c("#FA4616", "#0021A5")) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) 
+```
+
+
 ### Fluctuating Inputs
 
 NPP changes on diurnal, seasonal, and even longer-term cycles. When inputs are fluctuating, how does this one-pool proxy respond? We will focus on a yearly seasonal cycle (the parametrizations from Parton are monthly, so this makes sense as a starting point).
 
 ```{r InputsFlux}
 #Function for simulation with the 3feedback model, adjusting the inputs for seasonal change
-dCdt_seasonal_3feedback <- function(t, y, parms, input_type = 'seasonal' ){
+dCdt_seasonal_century <- function(t, y, parms, input_type = 'seasonal' ){
   pools <- matrix(y, nrow=3)
   allocation_matrix <- matrix(c(parms$input_to_fast, 
                                 parms$input_to_slow, 
@@ -484,8 +516,7 @@ dCdt_seasonal_3feedback <- function(t, y, parms, input_type = 'seasonal' ){
                               -parms$fast_to_passive, -parms$slow_to_passive,  1),
                             nrow = 3,
                             byrow=TRUE)
-  #dcdt = inputs * allocation + transfer_matrix %*% decay_matrix %*% y
-  #decay_matrix %*% transfer_matrix %*% y = - inputs * allocation
+  
   
   if(input_type == 'seasonal'){
     flux_input <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300) #offset by the parms$input parameter
@@ -495,69 +526,683 @@ dCdt_seasonal_3feedback <- function(t, y, parms, input_type = 'seasonal' ){
   
   ans <- flux_input * allocation_matrix - decay_matrix %*% transfer_matrix %*% y
   ##check conservation of mass
+  
   return(list(c(C_fast = ans[1],
            C_slow = ans[2],
            C_passive = ans[3]))) #add in CO2 pool
 }
 
-
-#Demonstration simulation that the method works to create seasonal change, over 5 years
-seasonal_sim_3feedback <- lsoda(y = C_ss_3feedback(parms = century_parameter.ls),
-                                      times = 0:60,
-                                      func = dCdt_seasonal_3feedback,
+#Simulation to verfiy that the method works to create seasonal change, over 5 years
+seasonal_century.sim <- lsoda(y = C_ss_3feedback(parms = century_parameter.ls),
+                                      times = Simtimes, 
+                                      func = dCdt_seasonal_century,
                                       parms = century_parameter.ls) %>%
                                   as.data.frame() %>% 
-                                  mutate(Feedback_C_total = C_fast+C_slow+C_passive)
+                                  mutate(C_total = C_fast+C_slow+C_passive) %>%
+                                  mutate(model= "Century") %>%
+                                  mutate(dCO2dt = dCdt_3feedback(t=NA, 
+                                                                 y=c(G=0,C_fast, C_slow, C_passive), 
+                                                                 parms= no_input_century_parameter.ls)[[1]]["G"], 
+                                                                 .by=everything() 
+                                         )
 
-                                  
 
-ggplot(pivot_longer(data=seasonal_sim_3feedback, cols = C_fast:C_passive, names_to = "pool", values_to = "stock")) +
+ggplot(data.frame(t=seq(0,(12*3), by=0.2)) %>% mutate(Inputs=(5/300)*sin((pi/6)*t+(3*pi/2))+(5/300)))+
+  geom_line(aes(x=t, y=Inputs)) +
+  labs(x="Time (months)", y="Carbon inputs")
+
+
+#Graphical depiction of the change
+ggplot(pivot_longer(data=seasonal_century.sim, cols = C_fast:C_passive, names_to = "pool", values_to = "stock")) +
   geom_line(aes(x=time, y=stock, color=pool)) +
-  geom_line(aes(x=time, y=Feedback_C_total))
+  geom_line(aes(x=time, y=C_total, color="Total SOC")) +
+  xlim(0,(5*12))+ 
+  labs(x="Time (months)", y="kg Organic Carbon / m^2")
 
 
 #One-Pool rate change function, with seasonal rate of change
-  ##The calucation of the Proxy decay rate relies on a steady state solution, which technically does not exist when inputs change - we then assume that the average over the year is constant, and that the steady state solution suffices.
+  ##The calucation of the Proxy decay rate relies on a steady state solution, which technically does not exist when inputs change and is instead replaced with a semisteady state - we then consider that the average over the year is constant, and that the steady state solution suffices.
 
-dCdt_seasonal_1pool <- function(t, y, parms){
+dCdt_seasonal_proxy <- function(t, y, parms){
   flux_input <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300)
   ans <- flux_input - y / parms$turnoverTime
   return(list(ans))
 }
 
 
-#Demonstration simulation that the method works to create seasonal change, over 5 years
-seasonal_sim_1pool <- lsoda(y = sum(C_ss_3feedback(parms = century_parameter.ls)) %>% setNames("C"),
-                                      times = 0:60,
-                                      func = dCdt_seasonal_1pool,
+#Simulation to show that the method works to create seasonal change, over 5 years
+seasonal_proxy.sim <- lsoda(y = sum(C_ss_3feedback(parms = century_parameter.ls)) %>% setNames("C"),
+                                      times = Simtimes, 
+                                      func = dCdt_seasonal_proxy,
                                       parms = century_parameter.ls) %>%
                                   as.data.frame() %>%
-                                  rename(One_Pool_Proxy = C)
+                                  rename(C_total = C) %>%
+                                  mutate(model="Proxy") %>%
+                                  mutate(dCO2dt = dCdt_1pool(t=NA, 
+                                                             y=c(G=0,C_total), 
+                                                             parms= no_input_century_parameter.ls)[[1]]["G"], 
+                                                            .by=everything() )
 
-ggplot(seasonal_sim_1pool) +
-  geom_line(aes(x=time, y=One_Pool_Proxy))
+# #Graphical Demonstration of the three pools + Total SOC
+# ggplot(seasonal_proxy.sim) +
+#   geom_line(aes(x=time, y=C_total))+
+#   xlim(0,(5*12))+ 
+#   labs(x="Time (months)", y="kg Organic Carbon / m^2")+
+#   ylim(4.2,4.5)
+
+
+seasonal_model_comparison.sim <- bind_rows(seasonal_proxy.sim, seasonal_century.sim)
+
+
+
+SeasonalGas.plot <- ggplot(seasonal_model_comparison.sim) +
+  geom_line(aes(x=time/12, y=dCO2dt*12, color=model, linetype=model)) +
+  xlim(0,3) +
+  #geom_ribbon(aes(x=time/12, ymax=dCO2dt*1.1*12, ymin=dCO2dt*0.9*12, fill=model), alpha=0.1)+
+  # labs(title="Through the Seasons: CO2 flux", 
+  #      subtitle = "Inputs fluctuate sinusoidally",
+  #      y="CO2 flux (kg C/(m^2 yr))", 
+  #      x="Time since carbon inputs removed (yr)",
+  #      color = "Model",
+  #      fill = "Model"
+  #      ) +
+  # theme(
+  #   legend.position = c(0.05,0.95),
+  #   legend.justification = c("left", "top"),
+  #   plot.title = element_text(hjust = 0.5),
+  #   plot.subtitle = element_text(hjust = 0.5)) +
+  # scale_fill_manual(values=c("#FA4616", "#0021A5")) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) 
+
+
+SeasonalStocks.plot <- ggplot(seasonal_model_comparison.sim) +
+  geom_line(aes(x=time/12, y=C_total, color=model, linetype=model)) +
+  #geom_ribbon(aes(x=time/12, ymax=C_total*1.1, ymin=C_total*0.9, fill=model), alpha=0.1)+
+  # labs(title="Through the Seasons: Soil Stocks", 
+  #      subtitle = "Inputs fluctuate sinusoidally",
+  #      y="Total Carbon Stocks (kg C/(m^2 yr))", 
+  #      x="Time since carbon inputs removed (yr)",
+  #      color = "Model",
+  #      fill = "Model",
+  #      linetype = "Model"
+  #      ) +
+  # theme(
+  #   legend.position = c(0.05,0.95),
+  #   legend.justification = c("left", "top"),
+  #   plot.title = element_text(hjust = 0.5),
+  #   plot.subtitle = element_text(hjust = 0.5) ) +
+  #scale_fill_manual(values=c("#FA4616", "#0021A5")) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) +
+  # ylim(4.35,4.425)+
+   xlim(0,3) 
+
 
                                 
-#Makes a dataframe to compare the two simulations total carbon
-seasonal_inputs_model_comparison <- as.data.frame(cbind(seasonal_sim_3feedback$time, seasonal_sim_3feedback$Feedback_C_total, seasonal_sim_1pool$One_Pool_Proxy)) %>% 
-    set_names(c("time", "Feedback_C_Total", "One_Pool_Proxy")) %>%
-    pivot_longer(cols = c("Feedback_C_Total", "One_Pool_Proxy"),
-                                 names_to = "model",
-                                 values_to = "stock")
+# #Makes a dataframe to compare the two simulations total carbon
+# seasonal_model_comparison <- as.data.frame(cbind(seasonal_sim_3feedback$time, seasonal_sim_3feedback$Feedback_C_total, seasonal_sim_proxy$One_Pool_Proxy)) %>% 
+#     set_names(c("time", "Feedback_C_Total", "One_Pool_Proxy")) %>%
+#     pivot_longer(cols = c("Feedback_C_Total", "One_Pool_Proxy"),
+#                                  names_to = "model",
+#                                  values_to = "stock")
 
-
-
-ggplot(seasonal_inputs_model_comparison)  +
-  geom_line(aes(x=time, y=stock, linetype=model, color=model)) +
-  labs(title="Seasonal Variation over 5 Years", y="Total Carbon (kg C/(m^2 yr))", x="Time (in months)" )
+ggplot(seasonal_model_comparison.sim %>% 
+         select(time, model, C_total) %>%
+         pivot_wider(names_from = "model", values_from = "C_total"))  +
+  geom_point(aes(x=Proxy, y=Century)) +
+  geom_abline()+
+  labs(title="Model Comparison for Seasonal Changes", subtitle = "Values from 100-year simulation, taken monthly")
 
 
 
 ```
-Holy crap that's close!!!!
 
-###Increasing Inputs
+Now to put it all together:
+
+```{r MainFig}
+
+#Normalize the ranges
+CO2range <- c(min(seasonal_model_comparison.sim$dCO2dt,no_input_model_comparison.sim$dCO2dt), max(seasonal_model_comparison.sim$dCO2dt,no_input_model_comparison.sim$dCO2dt))
+Stocksrange <- c(min(seasonal_model_comparison.sim$C_total,no_input_model_comparison.sim$C_total), max(seasonal_model_comparison.sim$C_total,no_input_model_comparison.sim$C_total))
+
+#futzing with linetype
+LT <- c(2,4)
+
+SeasonalGas.plot  <- SeasonalGas.plot +
+    ylim(CO2range*12) +
+    labs(x = "Time (yr)", y="CO2 flux (kg C/(m^2 yr))", 
+         #caption = "Seasonal CO2 flux", 
+         color = "Model", linetype = "Model")+
+    scale_linetype_manual(values=LT) +
+    scale_y_continuous(position = "right") +
+    theme(axis.title.x = element_text(family="Helvetica", size = 42))+
+    theme(axis.title.y.right = element_text(family="Helvetica", size = 42)) +
+    #theme(plot.caption = element_text(family = "Helvetica", hjust=0, size=rel(1.2))) +
+    theme_light()
+
+
+SeasonalStocks.plot <- SeasonalStocks.plot +
+    ylim(Stocksrange) +
+    labs(x="Time (yr)", y="Total SOC (kg/(m^2 yr))", 
+         #title= "Seasonal S.O.C.", 
+         color = "Model", linetype = "Model")+
+    scale_linetype_manual(values=LT) +
+    scale_y_continuous(position = "right")+
+    scale_x_continuous(position = "top")+
+    #theme(plot.title = element_text(family="Times New Roman", hjust=0.5))+
+    theme_light()
+
+ 
+IncubationGas.plot <- IncubationGas.plot +
+    ylim(CO2range*12) +
+    labs(x = "Time (yr)", y="CO2 flux (kg C/(m^2 yr))", 
+         #caption= "Incubation CO2 flux", 
+         color = "Model", linetype = "Model")+
+    scale_linetype_manual(values=LT) +
+    #theme(plot.caption = element_text(hjust=0.5, size=rel(1.2)))+
+    theme_light()
+
+
+IncubationStocks.plot <- IncubationStocks.plot +
+    ylim(Stocksrange) +
+    labs(x="Time (yr)", y="Total SOC (kg/(m^2 yr))", 
+         #title= "Incubation S.O.C.", 
+         color = "Model", linetype = "Model")+
+    scale_linetype_manual(values=LT) +
+    scale_x_continuous(position = "top") +
+    #theme(plot.title = element_text(hjust=0.5)) +
+    theme_light()
+
+
+my_layout <- c(area(2,  2, 50, 50),  #area(top,left,bottom,right)
+               area(1, 51, 50,100),
+               area(51, 1,100, 50),
+               area(51,51, 99, 99))
+
+
+IncubationStocks.plot + SeasonalStocks.plot + IncubationGas.plot + SeasonalGas.plot + 
+    plot_layout(design = my_layout,
+                guides = 'collect')
 
 
 
+
+
+```
+
+```{r MiniFig}
+
+
+MC_Season_SOC.plot <- ggplot(seasonal_model_comparison.sim %>% 
+         select(time, model, C_total) %>%
+         pivot_wider(names_from = "model", values_from = "C_total"))  +
+  geom_abline(color='red') +
+  geom_point(aes(x=Proxy, y=Century)) +
+  labs(title="Seasonal Changes, S.O.C.") +
+  xlim(min(seasonal_model_comparison.sim$C_total), max(seasonal_model_comparison.sim$C_total)) +
+  ylim(min(seasonal_model_comparison.sim$C_total), max(seasonal_model_comparison.sim$C_total))
+
+
+MC_Season_CO2.plot <- ggplot(seasonal_model_comparison.sim %>% 
+         select(time, model, dCO2dt) %>%
+         pivot_wider(names_from = "model", values_from = "dCO2dt"))  +
+  geom_abline(color='red') +
+  geom_point(aes(x=Proxy, y=Century)) +
+  labs(title="Seasonal Changes, CO2 flux") +
+  xlim(min(seasonal_model_comparison.sim$dCO2dt), max(seasonal_model_comparison.sim$dCO2dt)) +
+  ylim(min(seasonal_model_comparison.sim$dCO2dt), max(seasonal_model_comparison.sim$dCO2dt))
+
+MC_Inc_CO2.plot <- ggplot(no_input_model_comparison.sim %>% 
+         select(time, model, dCO2dt) %>%
+         pivot_wider(names_from = "model", values_from = "dCO2dt"))  +
+  geom_abline(color='red') +
+  geom_point(aes(x=Proxy, y=Century)) +
+  labs(title="Incubation experiment, CO2 flux")+
+  xlim(min(no_input_model_comparison.sim$dCO2dt), max(no_input_model_comparison.sim$dCO2dt)) +
+  ylim(min(no_input_model_comparison.sim$dCO2dt), max(no_input_model_comparison.sim$dCO2dt))
+
+MC_Inc_SOC.plot <- ggplot(no_input_model_comparison.sim %>% 
+         select(time, model, C_total) %>%
+         pivot_wider(names_from = "model", values_from = "C_total"))  +
+  geom_abline(color='red') +
+  geom_point(aes(x=Proxy, y=Century)) +
+  labs(title="Incubation experiment, S.O.C.")+
+  xlim(min(no_input_model_comparison.sim$C_total), max(no_input_model_comparison.sim$C_total)) +
+  ylim(min(no_input_model_comparison.sim$C_total), max(no_input_model_comparison.sim$C_total))
+
+MC_Inc_SOC.plot + MC_Season_SOC.plot + MC_Inc_CO2.plot + MC_Season_CO2.plot + 
+    plot_annotation(title = 'Model Comparisons') +
+    plot_layout(design = my_layout,
+                guides = 'collect')
+
+```
+
+
+```{r MainFig2}
+no_input_model_comparison.sim <- no_input_model_comparison.sim %>% mutate(Simulation = "Incubation")
+seasonal_model_comparison.sim <- seasonal_model_comparison.sim %>% mutate(Simulation = "Seasonal")
+
+Model_Comparison_all.sim <- bind_rows(seasonal_model_comparison.sim, no_input_model_comparison.sim)
+
+LT <- c(2,1)
+
+CompGas.plot <- ggplot(Model_Comparison_all.sim) +
+  geom_line(aes(x=time/12, y=dCO2dt*12, linetype=model, color=Simulation)) +
+  labs(y="CO2 flux (kg C/(m^2 yr))", 
+        x="Time (yr)"
+        ) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) +
+  scale_linetype_manual(values=LT) 
+
+CompSOC.plot <- ggplot(Model_Comparison_all.sim) +
+  geom_line(aes(x=time/12, y=C_total, 
+                  linetype=Simulation, 
+                  color=model), alpha=0.8) +
+  labs(y="Total S.O.C. (kg C/m^2 )", 
+        x="Time (yr)"
+        ) +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) +
+  scale_linetype_manual(values=LT) 
+
+CompSOC.plot + inset_element(SeasonalStocks.plot, left =  unit(1, 'npc') - unit(1, 'cm'), bottom =  unit(1, 'npc') - unit(1, 'cm'), right =0.5, top = 0.5) # / CompGas.plot
+
+```
+
+##Other simulations:
+###Regime Transition
+
+```{r}
+century_parameter.ls <- c(century_parameter.ls,
+                          Regime_Change_ratio = 2,
+                          Regime_Change_duration = Inf, #in years
+                          Start_Regime_Change = 20 #in years
+                          )
+
+Simtimes <- seq(0,(500*12), 6)
+
+#Rate of Change for the Regime Change simulation
+dCdt_regime_century <- function(t, 
+                                y, #y is a vector in the order of: (C_fast, C_slow, C_passive, Inputs, G)
+                                parms){
+  pools <- matrix(y[1:3], nrow=3)
+  allocation_matrix <- matrix(c(parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                1 - parms$input_to_fast - parms$input_to_slow),
+                              nrow = 3)
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+                              -parms$fast_to_slow, 1, -parms$passive_to_slow,
+                              -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                            nrow = 3,
+                            byrow=TRUE)
+  
+#Changing the inputs for X years; we'll see if this works with lsoda (it does!)
+#Change the duration of input change, time at which the change occurs, and ratio of input change in the parameter list at the top of the chunk
+  if(t >= parms$Start_Regime_Change*12 &
+     t < (12*(parms$Start_Regime_Change+parms$Regime_Change_duration)) ){
+    RegimeInputs <- parms$inputs*parms$Regime_Change_ratio
+  } else { 
+    RegimeInputs <- parms$inputs 
+  }
+  
+  ans <- RegimeInputs * allocation_matrix - decay_matrix %*% transfer_matrix %*% pools
+  
+  dCO2 <- sum(decay_matrix %*% transfer_matrix %*% pools)
+  
+  return(list(c(C_fast = ans[1],
+           C_slow = ans[2],
+           C_passive = ans[3],
+           Inputs = RegimeInputs,
+           G = dCO2
+           ))) 
+}
+
+#Rate of Change for the proxy function
+dCdt_regime_proxy <- function(t, y, parms){
+  
+  pool <- y[1]
+  
+#Changing the inputs for X years; we'll see if this works with lsoda
+  if(t >= parms$Start_Regime_Change*12 &
+     t < (12*(parms$Start_Regime_Change+parms$Regime_Change_duration)) ){
+    RegimeInputs <- parms$inputs*parms$Regime_Change_ratio
+  } else { 
+    RegimeInputs <- parms$inputs 
+  }
+  
+  ans <- RegimeInputs - pool / parms$turnoverTime
+  
+  dCO2 <- pool / parms$turnoverTime
+  
+  return(list(c(ans, Inputs = RegimeInputs, G = dCO2)))
+}
+
+
+regime_change_feedback_sim <- lsoda(y = c(C_ss_3feedback(parms = century_parameter.ls), Inputs = 0, G=0),
+                                      times = Simtimes,
+                                      func = dCdt_regime_century,
+                                      parms = century_parameter.ls) %>%
+                                  as.data.frame() %>%
+                          mutate(C_total = C_fast + C_slow +C_passive) %>%
+                          mutate(model="Century") %>%
+                          mutate(dCO2dt = dCdt_3feedback(t=NA, 
+                                                         y=c(G=0,C_fast, C_slow, C_passive), 
+                                                         parms=century_parameter.ls)[[1]]["G"], 
+                                .by=everything() 
+                                )
+
+ggplot(regime_change_feedback_sim, aes(x=time)) +
+  geom_area(aes(y=Inputs), color="red", alpha=0.1) +
+  geom_area(aes(y=G), color="blue", alpha=0.1)
+
+regime_change_proxy_sim <- lsoda(y = c(C_total=sum(C_ss_3feedback(parms = century_parameter.ls)), Inputs=0, G=0),
+                                      times = Simtimes,
+                                      func = dCdt_regime_proxy,
+                                      parms = century_parameter.ls) %>%
+                                  as.data.frame() %>%
+                          mutate(model="Proxy") %>%
+                          mutate(dCO2dt = dCdt_1pool(t=NA, 
+                                                     y=c(C_total,Inputs, G), 
+                                                     parms=century_parameter.ls)[[1]]["G"], 
+                                 .by=everything() )
+
+ggplot(regime_change_proxy_sim, aes(x=time)) +
+  geom_area(aes(y=Inputs), color="red", alpha=0.1)+
+  geom_area(aes(y=G), color="blue", alpha=0.1)
+
+
+regime_change_model_comparison.sim <- bind_rows(regime_change_feedback_sim, regime_change_proxy_sim)
+
+ggplot(regime_change_model_comparison.sim) + 
+  #geom_rect(aes(xmin=6/12, xmax=18/12, ymin=-Inf, ymax=Inf), color="lightgrey", alpha=0.1) +
+  geom_vline(xintercept=century_parameter.ls$Start_Regime_Change, linetype="dashed", alpha=0.5, color="black") +
+  #geom_vline(xintercept=century_parameter.ls$Start_Regime_Change/12 + century_parameter.ls$Regime_Change_duration, linetype="dashed", alpha=0.5, color="black")  +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) +
+  geom_line(aes(x=time/12, y=C_total, color=model)) +
+  labs(title="Regime Change over time, S.O.C. stocks") 
+
+
+ggplot(regime_change_model_comparison.sim) + 
+  #geom_rect(aes(xmin=6/12, xmax=18/12, ymin=-Inf, ymax=Inf), color="lightgrey", alpha=0.1) +
+  geom_vline(xintercept=6/12, linetype="dashed", alpha=0.5, color="black") +
+  geom_vline(xintercept=18/12, linetype="dashed", alpha=0.5, color="black")  +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) +
+  geom_line(aes(x=time/12, y=dCO2dt*12, color=model)) +
+  labs(title="Regime Change over time, Respiration")
+
+
+ggplot(regime_change_model_comparison.sim %>% 
+         select(time, model, C_total) %>%
+         pivot_wider(names_from = "model", values_from = "C_total"))  +
+  geom_abline(color='red') +
+  geom_point(aes(x=Proxy, y=Century)) +
+  labs(title="Regime Change, S.O.C.") +
+  xlim(min(regime_change_model_comparison.sim$C_total), max(regime_change_model_comparison.sim$C_total)) +
+  ylim(min(regime_change_model_comparison.sim$C_total), max(regime_change_model_comparison.sim$C_total))
+
+
+```
+
+
+###Detrital Treatments Transition
+
+```{r}
+century_parameter.ls <- c(century_parameter.ls,
+                          Detritus_addition = 0.1, #percentage of soc added
+                          Detritus_time = 0 #in months
+                          )
+
+Simtimes <- seq(0,(20*12), 1)
+
+#Rate of Change for the Detritus addition simulation
+dCdt_detrital_addition_century <- function(t, 
+                                y, #y is a vector in the order of: (C_fast, C_slow, C_passive, G)
+                                parms){
+  pools <- matrix(y[1:3], nrow=3)
+  allocation_matrix <- matrix(c(parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                1 - parms$input_to_fast - parms$input_to_slow),
+                              nrow = 3)
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+                              -parms$fast_to_slow, 1, -parms$passive_to_slow,
+                              -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                            nrow = 3,
+                            byrow=TRUE)
+  
+#Change the percentage of addition and time at which the change occurs in the parameter list at the top of the chunk
+  if(t == parms$Detritus_time ){
+    pools <- pools + parms$Detritus_addition*sum(pools)*allocation_matrix
+  } 
+  
+  ans <-parms$inputs * allocation_matrix - decay_matrix %*% transfer_matrix %*% pools
+  
+  dCO2 <- sum(decay_matrix %*% transfer_matrix %*% pools)
+  
+  return(list(c(C_fast = ans[1],
+           C_slow = ans[2],
+           C_passive = ans[3],
+           G = dCO2
+           ))) 
+}
+
+#Rate of Change for the proxy function
+dCdt_detrital_addition_proxy <- function(t, y, parms){
+  
+  pool <- y[1]
+  
+#Change the percentage of addition and time at which the change occurs in the parameter list at the top of the chunk
+  if(t == parms$Detritus_time ){
+    pool <- pool + parms$Detritus_addition*pool
+  } 
+  
+  ans <- parms$inputs - pool / parms$turnoverTime
+  
+  dCO2 <- pool / parms$turnoverTime
+  
+  return(list(c(ans, G = dCO2)))
+}
+
+
+detrital_addition_feedback_sim <- lsoda(y = c(C_ss_3feedback(parms = century_parameter.ls), G=0),
+                                      times = Simtimes,
+                                      func = dCdt_detrital_addition_century,
+                                      parms = century_parameter.ls) %>%
+                                  as.data.frame() %>%
+                          mutate(C_total = C_fast + C_slow +C_passive) %>%
+                          mutate(model="Century") %>%
+                          mutate(dCO2dt = dCdt_3feedback(t=NA, 
+                                                         y=c(G=0,C_fast, C_slow, C_passive), 
+                                                         parms=century_parameter.ls)[[1]]["G"], 
+                                .by=everything() 
+                                )
+
+ggplot(detrital_addition_feedback_sim, aes(x=time)) +
+  geom_area(aes(y=G), color="blue", alpha=0.1)
+
+detrital_addition_proxy_sim <- lsoda(y = c(C_total=sum(C_ss_3feedback(parms = century_parameter.ls)), G=0),
+                                      times = Simtimes,
+                                      func = dCdt_detrital_addition_proxy,
+                                      parms = century_parameter.ls) %>%
+                                  as.data.frame() %>%
+                          mutate(model="Proxy") %>%
+                          mutate(dCO2dt = dCdt_1pool(t=NA, 
+                                                     y=c(C_total, G), 
+                                                     parms=century_parameter.ls)[[1]]["G"], 
+                                 .by=everything() )
+
+ggplot(detrital_addition_proxy_sim, aes(x=time)) +
+  geom_area(aes(y=G), color="blue", alpha=0.1)
+
+
+detrital_addition_model_comparison.sim <- bind_rows(detrital_addition_feedback_sim, detrital_addition_proxy_sim)
+
+ggplot(detrital_addition_model_comparison.sim) + 
+  geom_vline(xintercept=century_parameter.ls$Detritus_time, linetype="dashed", alpha=0.5, color="black") +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) +
+  geom_line(aes(x=time/12, y=C_total, color=model)) +
+  labs(title="Sim Change over time, S.O.C. stocks") 
+
+
+ggplot(detrital_addition_model_comparison.sim) + 
+  geom_vline(xintercept=century_parameter.ls$Detritus_time, linetype="dashed", alpha=0.5, color="black") +
+  scale_color_manual(values=c("#FA4616", "#0021A5")) +
+  geom_line(aes(x=time/12, y=dCO2dt*12, color=model)) +
+  labs(title="Sim Change over time, Respiration")
+
+
+ggplot(detrital_addition_model_comparison.sim %>% 
+         select(time, model, C_total) %>%
+         pivot_wider(names_from = "model", values_from = "C_total"))  +
+  geom_abline(color='red') +
+  geom_point(aes(x=Proxy, y=Century)) +
+  labs(title="Sim Change, S.O.C.") +
+  xlim(min(regime_change_model_comparison.sim$C_total), max(regime_change_model_comparison.sim$C_total)) +
+  ylim(min(regime_change_model_comparison.sim$C_total), max(regime_change_model_comparison.sim$C_total))
+
+
+```
+
+
+
+
+##Adding the litter: Five decay pools
+
+Century uses two litter pools (structural and metabolic, based on lignin ratio) in addition to the three soil pools (fast (active), slow, and passive speeds of decay). 
+
+```{r Five pool model}
+#Notes on the input fraction calculations (gleaned from Parton's CENTURY model)
+  #Parton uses MONTHLY time steps
+  #Century breaks up plant residue into metabolic C and Structural C based on the Lignin to Nitrogen ratio.
+    #We will be using a 7/1 Lignin to Nitrogen ratio, thus 12.5% of plant litter is in the form of metabolic C and 87.5% is a structural C.
+    #Century then sends 45% of metabolic C to the fast pool (the rest decays before entering the soil pool). - including this fraction breaks mass balance so it is omitted
+ #Century then sends a portion of structural C to the fast and slow pools based on the lignin fraction A.
+    ### !!!! because I have no idea what the lignin fraction even is, I'm using the placeholder value of 50%.
+    # 70% of A* Structural C goes to the Slow pool (rest decays before reaching soil) - including this fraction breaks mass balance so it is omitted
+    # 45% (?) of (1-A)*Structural C goes to fast (rest decays before reaching soil) - including this fraction breaks mass balance so it is omitted
+
+century_parameter5.ls <- list(inputs = 0.2/12, #monthly; divided evenly between the months
+                            input_to_struc = .125,  
+                            input_to_meta = .875,  
+                            #no direct inputs into soil pools; C goes through litter pools first
+                     #fast turnover according to Century \tau; [2, 4] yr
+                     turnoverTime_struc = 3*12,    #3y  
+                     turnoverTime_meta = .5*12,   #.5y
+                     turnoverTime_fast = 1.5*12,    #1.5y  
+                     turnoverTime_slow = 25*12,       #25y
+                     turnoverTime_passive = 1000*12,  #1000y
+                     
+                       struc_to_fast = 
+                       struc_to_slow =
+                       meta_to_fast = .45,    #55% as CO2
+                       fast_to_slow = 0.486,       # This is determined in CENTURY based on a soil vs. silt & clay fraction
+                                                        # if soil to silt+clay fraction is zero, then = .15-.004
+                                                        # if fraction is 1, then =.83-.004
+                                                        # currently using the average between the two: .486
+                       fast_to_passive = 0.004,    #
+                       slow_to_fast = 0.42,        #
+                       slow_to_passive = 0.03,     #
+                       passive_to_fast = 0.45,     #
+                       passive_to_slow = 0         # CENTURY does not include this flow
+                       )
+
+#steady state calculations for each pool
+SS_5feedback <- function(parms){
+  allocation_vector <- matrix(c(parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                1 - parms$input_to_fast - parms$input_to_slow),
+                              nrow = 3)
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+                              -parms$fast_to_slow, 1, -parms$passive_to_slow,
+                              -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                            nrow = 3,
+                            byrow=TRUE)
+  #0 = inputs * allocation - decay_matrix %*% transfer_matrix %*% y
+  #decay_matrix %*% transfer_matrix %*% y = inputs * allocation
+  
+  ans <- solve(decay_matrix  %*% transfer_matrix ,parms$inputs * allocation_vector)
+  
+  return(c(C_fast = ans[1],
+           C_slow = ans[2],
+           C_passive = ans[3]))
+}
+
+
+#ODE for a three-pool FOLD model
+dCdt_3feedback <- function(t, y, parms){
+  G <- y[1]
+ pools <- matrix(y[2:4], nrow=3)
+ allocation_matrix <- matrix(c(parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                1 - parms$input_to_fast - parms$input_to_slow),
+                              nrow = 3)
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  transfer_matrix <- matrix(c(1,  -parms$slow_to_fast, -parms$passive_to_fast,
+                              -parms$fast_to_slow, 1, -parms$passive_to_slow,
+                              -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                            nrow = 3,
+                            byrow=TRUE)
+  ans <- parms$inputs * allocation_matrix - decay_matrix %*% transfer_matrix %*% pools
+  
+  resp <- decay_matrix %*% transfer_matrix %*% pools
+  total_resp <- sum(resp)
+  
+  return(list(c(G = total_resp,
+                C_fast = ans[1],
+                C_slow = ans[2],
+                C_passive = ans[3]
+  )))
+}
+
+
+#initial value
+InitialCarbon_3pool <- C_ss_3feedback(parms = century_parameter.ls)*0.75
+
+#making a more realistic simulation time for a monthly model with turnover times in the 1000s
+simTime <- 1000*12
+
+#simulation
+sim_Century <- lsoda(y = c(G=0, 
+                              #C_fast = 0, C_slow = 0, C_passive =0), #use for full range of carbon stocks comparison?
+                              InitialCarbon_3pool),
+                      times = 0:simTime,
+                      func = dCdt_3feedback,
+                      parms = century_parameter.ls) %>%
+                  as.data.frame() %>%
+                  mutate(C_total = C_fast + C_slow +C_passive) 
+
+
+#Feedback graph by pools:
+ggplot(sim_Century %>%
+         pivot_longer(cols = C_fast:C_passive,
+                      names_to = 'pool',
+                      values_to = 'stock')%>%
+         mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
+                model = '3feedback')
+) +
+  geom_line(aes(x=time, y=stock, color = model)) +
+  facet_wrap(~ pool, ncol=1, scales='free')
+
+
+#Feedback graphs: total carbon and respiration 
+ggplot(sim_Century %>%
+         pivot_longer(cols = C_fast:C_passive,
+                      names_to = 'pool',
+                      values_to = 'stock')%>%
+         mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
+                model = '3feedback')
+) +
+  geom_line(aes(x=time, y=stock, color = model)) +
+  facet_wrap(~ pool, ncol=1, scales='free')
+
+
+```
 
