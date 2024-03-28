@@ -1402,8 +1402,7 @@ ggplot(sim_Century5 %>%
                 model = '5 pool')
 ) +
   geom_line(aes(x=time, y=stock)) +
-  facet_wrap(~ pool, ncol=1, scales='free') + 
-  scale_x_log10()
+  facet_wrap(~ pool, ncol=1, scales='free') 
 
 
 ```
