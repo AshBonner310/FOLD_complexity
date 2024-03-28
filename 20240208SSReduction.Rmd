@@ -130,10 +130,10 @@ grViz("
     }
     
     Inputs  -> Fast     [headport=w, color = red3]; 
-    Inputs  -> Slow     [headport=w, color = green3]; 
+    Inputs  -> Slow     [headport=w, color = purple3]; 
     Inputs  -> Passive  [headport=w, color = blue3];
     Fast    -> CarbonDioxide [tailport=n, color = red3]; 
-    Slow    -> CarbonDioxide [tailport=n, color=green3]; 
+    Slow    -> CarbonDioxide [tailport=n, color=purple3]; 
     Passive -> CarbonDioxide [tailport=n, color=blue3]
     
       subgraph cluster_SoilPools {
@@ -144,19 +144,19 @@ grViz("
               style=solid]
         rank = same
           
-        Fast[color=red3, fontcolor=red4]; Slow[color=green3, fontcolor=green4]; Passive[color=blue3, fontcolor=blue4]
+        Fast[color=red3, fontcolor=red4]; Slow[color=purple3, fontcolor=purple4]; Passive[color=blue3, fontcolor=blue4]
         
         #Fluxes out of Fast
-        Fast -> Slow[tailport=n, color = red]
-        Fast -> Passive[tailport=n, color = red]
+        Fast -> Slow[tailport=n, color = MediumVioletRed]
+        Fast -> Passive[tailport=n, color = DarkViolet]
         
         #Fluxes out of Slow
-        Fast -> Slow [dir=back, color = green, headport = n]
-        Slow -> Passive[tailport=n, color = green]
+        Fast -> Slow [dir=back, color = MediumVioletRed, headport = n]
+        Slow -> Passive[tailport=n, color = SlateBlue3]
         
         #Fluxes out of Passive
-        Fast -> Passive[dir=back, color=blue, headport = n]
-        Slow -> Passive[dir=back, color=blue, headport = n]
+        Fast -> Passive[dir=back, color=DarkViolet, headport = n]
+        Slow -> Passive[dir=back, color=SlateBlue3, headport = n]
       }
     }
   }
@@ -334,7 +334,11 @@ century_parameter.ls <- list(
 
 ##Steady State for the Three-pool model
 
--text here-
+One of the special properties of the matrix $\boldsymbol{K}\boldsymbol{A}$ is that it is an M-matrix, and importantly, is invertible. 
+The means that we can solve directly for steady state:
+
+$$ \frac{d\vec{C}}{dt} = 0 \implies \boldsymbol{K}\boldsymbol{A}\vec{C} = u\vec{b} \implies \vec{C} = u \left( \boldsymbol{K}\boldsymbol{A} \right)^{-1} \vec{b} $$
+Using this steady state, we can then use a fraction of as an initial value to run a simulation, just for the purposes of verifying our steady state is correct and to evaluate a basic behavior of the system.
 
 ```{r SS-n-Simumlation}
 
@@ -362,16 +366,12 @@ SS_Century <- function(parms){
            C_passive = ans[3]))
 }
 
-#initial value
-InitialCarbon_3pool <- SS_Century(parms = century_parameter.ls)*0.75
-
 #making a more realistic simulation time for a monthly model with turnover times in the 1000s
-simTime <- 1000*12
+simTime <- 5e3*12
 
 #simulation
 sim_Century <- lsoda(y = c(G=0, 
-                              #C_fast = 0, C_slow = 0, C_passive =0), #use for full range of carbon stocks comparison?
-                              InitialCarbon_3pool),
+                           SS_Century(parms = century_parameter.ls)*0.5),
                       times = 0:simTime,
                       func = dCdt_Century,
                       parms = century_parameter.ls) %>%
@@ -380,32 +380,37 @@ sim_Century <- lsoda(y = c(G=0,
 
 
 #Feedback graph by pools:
-ggplot(sim_Century %>%
+Century_spinup_facet_graph <- ggplot(sim_Century %>%
+         pivot_longer(cols = C_fast:C_passive,
+                      names_to = 'pool',
+                      values_to = 'stock')%>%
+         mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
+                model = '3feedback')
+        ) +
+  geom_line(aes(x=time, y=stock, color = model)) +
+  facet_wrap(~ pool, ncol=1, scales='free')
+
+#Feedback graph with pools stacked:
+Century_spinup_stack_graph <- ggplot(sim_Century %>%
          pivot_longer(cols = C_fast:C_passive,
                       names_to = 'pool',
                       values_to = 'stock')%>%
          mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
                 model = '3feedback')
 ) +
-  geom_line(aes(x=time, y=stock, color = model)) +
-  facet_wrap(~ pool, ncol=1, scales='free')
+  geom_area(aes(x=time, y=stock, fill = pool)) +
+  xlim(0,12*2.5e2)
 
 
-#Feedback graphs: total carbon and respiration 
-ggplot(sim_Century %>%
-         pivot_longer(cols = C_fast:C_passive,
-                      names_to = 'pool',
-                      values_to = 'stock')%>%
-         mutate(pool = factor(pool, levels = c('C_fast', 'C_slow', 'C_passive')),
-                model = '3feedback')
-) +
-  geom_line(aes(x=time, y=stock, color = model)) +
-  facet_wrap(~ pool, ncol=1, scales='free')
-
-
+#print graphs with regular and log-scale time
+Century_spinup_facet_graph
+Century_spinup_facet_graph + scale_x_log10()
+Century_spinup_stack_graph
+#Century_spinup_stack_graph + scale_x_log10()
+  ##honestly, this last one is not as interesting, especially with the difference
 ```
 
-##A One-pool Proxy Decay Rate for the Three-pool model
+## A One-pool Proxy Decay Rate for the Three-pool model
 
 -text here-
 
@@ -1245,9 +1250,9 @@ century_parameter5.ls <- list(
                         input_to_passive = 0,  
                             
                      #turnover times
-                     turnoverTime_struc = 3*12,    #3y  
                      turnoverTime_meta = .5*12,   #.5y
-                     turnoverTime_fast = 1.5*12,    #1.5y  
+                     turnoverTime_fast = 1.5*12,    #1.5y
+                     turnoverTime_struc = 3*12,    #3y
                      turnoverTime_slow = 25*12,       #25y
                      turnoverTime_passive = 1000*12,  #1000y
                      
@@ -1285,29 +1290,31 @@ century_parameter5.ls <- list(
 #steady state calculations for each pool
 SS_Century5 <- function(parms){
   allocation_vector <- matrix(c(parms$input_to_meta, 
-                                parms$input_to_struc, 
                                 parms$input_to_fast, 
+                                parms$input_to_struc, 
                                 parms$input_to_slow, 
                                 parms$input_to_passive),
                               nrow = 5)
   decay_matrix <- diag(x= 1/c(parms$turnoverTime_meta,
-                             parms$turnoverTime_struc,
                              parms$turnoverTime_fast,
+                             parms$turnoverTime_struc,
                              parms$turnoverTime_slow,
                              parms$turnoverTime_passive))
-  transfer_matrix <- matrix(c(1, -parms$struc_to_meta, -parms$fast_to_meta, -parms$slow_to_meta, -parms$passive_to_meta,
-                              -parms$meta_to_struc, 1, -parms$fast_to_struc, -parms$slow_to_struc, -parms$passive_to_struc,
-                              -parms$meta_to_fast, -parms$struc_to_fast, 1,  -parms$slow_to_fast, -parms$passive_to_fast,
-                              -parms$meta_to_slow, -parms$struc_to_slow, -parms$fast_to_slow, 1, -parms$passive_to_slow,
-                              -parms$meta_to_passive, -parms$struc_to_passive, -parms$fast_to_passive, -parms$slow_to_passive,  1),
+  transfer_matrix <- matrix(c(
+    1,                      -parms$fast_to_meta,    -parms$struc_to_meta,    -parms$slow_to_meta,    -parms$passive_to_meta,
+    -parms$meta_to_fast,    1,                      -parms$struc_to_fast,    -parms$slow_to_fast,    -parms$passive_to_fast,
+    -parms$meta_to_struc,   -parms$fast_to_struc,   1,                       -parms$slow_to_struc,   -parms$passive_to_struc,
+    -parms$meta_to_slow,    -parms$fast_to_slow,    -parms$struc_to_slow,    1,                      -parms$passive_to_slow,
+    -parms$meta_to_passive, -parms$fast_to_passive, -parms$struc_to_passive, -parms$slow_to_passive,  1
+    ),
                             nrow = 5,
                             byrow=TRUE)
   
   ans <- solve(decay_matrix  %*% transfer_matrix ,parms$inputs * allocation_vector)
 
   return(c(Lit_metabolic = ans[1],
-           Lit_structural = ans[2],
-           Soil_fast = ans[3],
+           Soil_fast = ans[2],
+           Lit_structural = ans[3],
            Soil_slow = ans[4],
            Soil_passive = ans[5]))
 }
@@ -1316,23 +1323,30 @@ SS_Century5 <- function(parms){
 #ODE for a five-pool FOLD model
 dCdt_Century5 <- function(t, y, parms){
   G <- y[1]
- pools <- matrix(y[2:6], nrow=5)
+  pools <- matrix(y[2:6], nrow=5)
   allocation_vector <- matrix(c(parms$input_to_meta, 
-                                parms$input_to_struc, 
                                 parms$input_to_fast, 
+                                parms$input_to_struc, 
                                 parms$input_to_slow, 
                                 parms$input_to_passive),
-                              nrow = 5)
+                              nrow = 5
+                              )
+  
   decay_matrix <- diag(x= 1/c(parms$turnoverTime_meta,
-                             parms$turnoverTime_struc,
                              parms$turnoverTime_fast,
+                             parms$turnoverTime_struc,
                              parms$turnoverTime_slow,
-                             parms$turnoverTime_passive))
-  transfer_matrix <- matrix(c(1, -parms$struc_to_meta, -parms$fast_to_meta, -parms$slow_to_meta, -parms$passive_to_meta,
-                              -parms$meta_to_struc, 1, -parms$fast_to_struc, -parms$slow_to_struc, -parms$passive_to_struc,
-                              -parms$meta_to_fast, -parms$struc_to_fast, 1,  -parms$slow_to_fast, -parms$passive_to_fast,
-                              -parms$meta_to_slow, -parms$struc_to_slow, -parms$fast_to_slow, 1, -parms$passive_to_slow,
-                              -parms$meta_to_passive, -parms$struc_to_passive, -parms$fast_to_passive, -parms$slow_to_passive,  1),
+                             parms$turnoverTime_passive
+                             )
+                       )
+  
+  transfer_matrix <- matrix(c(
+    1,                      -parms$fast_to_meta,    -parms$struc_to_meta,    -parms$slow_to_meta,    -parms$passive_to_meta,
+    -parms$meta_to_fast,    1,                      -parms$struc_to_fast,     -parms$slow_to_fast,   -parms$passive_to_fast,
+    -parms$meta_to_struc,   -parms$fast_to_struc,   1,                       -parms$slow_to_struc,   -parms$passive_to_struc,
+    -parms$meta_to_slow,    -parms$fast_to_slow,    -parms$struc_to_slow,    1,                      -parms$passive_to_slow,
+    -parms$meta_to_passive, -parms$fast_to_passive, -parms$struc_to_passive, -parms$slow_to_passive,  1
+    ),
                             nrow = 5,
                             byrow=TRUE)
   
@@ -1341,13 +1355,16 @@ dCdt_Century5 <- function(t, y, parms){
   resp <- decay_matrix %*% transfer_matrix %*% pools
   total_resp <- sum(resp)
   
-  return(list(c(G = total_resp,
-           Lit_metabolic = ans[2],
+  return(list(c(
+           G = total_resp,
+           Lit_metabolic = ans[1],
+           Soil_fast = ans[2],
            Lit_structural = ans[3],
-           Soil_fast = ans[4],
-           Soil_slow = ans[5],
-           Soil_passive = ans[6]
-  )))
+           Soil_slow = ans[4],
+           Soil_passive = ans[5]
+           )
+           )
+         )
 }
 
 
@@ -1370,7 +1387,7 @@ ggplot(sim_Century5 %>%
                       names_to = 'pool',
                       values_to = 'stock')%>%
          mutate(pool = factor(pool, levels = c('Lit_metabolic', 'Lit_structural', 'Soil_fast', 'Soil_slow', 'Soil_passive')),
-                model = '5 pool')
+                model = '5pool')
 ) +
   geom_line(aes(x=time, y=stock)) +
   facet_wrap(~ pool, ncol=1, scales='free')
@@ -1385,7 +1402,8 @@ ggplot(sim_Century5 %>%
                 model = '5 pool')
 ) +
   geom_line(aes(x=time, y=stock)) +
-  facet_wrap(~ pool, ncol=1, scales='free')
+  facet_wrap(~ pool, ncol=1, scales='free') + 
+  scale_x_log10()
 
 
 ```
