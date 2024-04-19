@@ -52,8 +52,8 @@ Parameters_OnePool.ls <- list(inputs = 0.2/12,
                                 #u; [0, 2.5] kg-carbon m-2 yr-1; split per month (to fit CENTURY parameters)
                               turnoverTime = 15*12,
                                 #\tau; [10, 50] yr, by month
-                              input_type = 'base' #needed to allow for this value to work in the simulation comparisons later
-                             
+                              input_type = 'base', #needed to allow for this value to work in the simulation comparisons later
+                              shift_percent = 2 #needed for regime shift simulation
                              ) 
 simTime <- 100*12
 
@@ -70,7 +70,7 @@ dCdt_OnePool <- function(t, y, parms, rel_tol = 1e-8){ #
       inputs <- 0
     }else if(parms$input_type == 'regime shift'){
       if(t>10){
-        inputs <- parms$inputs * 2 ##double inputs
+        inputs <- parms$inputs * parms$shift_percent ##double inputs
       }else{
         inputs <- parms$inputs
       }
@@ -336,16 +336,17 @@ dCdt_FivePool.fn <- function(t, #vector of times
                             byrow=TRUE)
   
   # #Debugging code below
-  # parms <- list(input_type = 'seasonal',
-  #               inputs = 1)
-  # t <- seq(0,24, by = 1)
+  # parms <- list(input_type = 'regimeshift',
+  #               inputs = 1,
+  #               shift_percent = 2)
+  # t <- 11  #seq(0,24, by = 1)
   
   if(parms$input_type == 'seasonal'){
       inputs <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300) #offset by the parms$input parameter
     }else if(parms$input_type == 'incubation'){
       inputs <- 0
     }else if(parms$input_type == 'regimeshift'){
-      if(t>10){
+      if(t > 10){
         inputs <- parms$inputs * parms$shift_percent ##double inputs
       }else{
         inputs <- parms$inputs
@@ -515,13 +516,6 @@ ggplot(SpinUp_Proxy_sim.df) +
             aes(x=time, y=C_total), linetype="dotted") +
   #scale_x_log10()
   xlim(0,150)
-  
-# sim_all <- sim_Century %>%
-#   full_join(sim_Proxy, by = 'time', suffix = c('.3pool', '.proxy')) %>%
-#   mutate(flux_3pool = dCdt_Century(t = time, y = c(0, C_fast, C_slow, C_passive),
-#                                      parms = century_parameter.ls)[[1]][1],
-#          flux_proxy = dCdt_1pool(t = time, y = c(0, C_total.proxy),
-#                                      parms = century_parameter.ls)[[1]][1], .by= everything())
 
 ```
 
@@ -529,6 +523,11 @@ ggplot(SpinUp_Proxy_sim.df) +
 
 Does a single pool model structure with first order linear decay actually stand up against a more robust multi-pool structure?
 Here we will test it against a five pool Century model in a number of applications and compare the outputs.
+
+## Input types
+We can determine how this aggregate decay rate performs by evaluating a varying input rate -  Net Primary Production and the transference of carbon from vegetation to the soil does not stay constat throughout time.
+We are simulating four scenarios, using the total carbon input to evaluate how the reduced complexity model responds compared to the five-pool decay model.
+
 
 ## Spin up
 
@@ -868,6 +867,7 @@ How does this aggregate decay rate compare to the full model when a regime shift
 
 
 ```{r RegimeShift}
+
 Parameters_FivePool.ls$input_type <- 'regime shift'
 Parameters_FivePool.ls$shift_percent <- 2 #doubles the inputs
 
