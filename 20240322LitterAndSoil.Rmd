@@ -5,6 +5,7 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
+
 ```{r setup, include=FALSE}
 #useful functions in here
 
@@ -16,6 +17,7 @@ library(dplyr) #data wrangling
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
 
 # A standard one pool model
 
@@ -52,24 +54,29 @@ Parameters_OnePool.ls <- list(inputs = 0.2/12,
                                 #u; [0, 2.5] kg-carbon m-2 yr-1; split per month (to fit CENTURY parameters)
                               turnoverTime = 15*12,
                                 #\tau; [10, 50] yr, by month
-                              input_type = 'base', #needed to allow for this value to work in the simulation comparisons later
-                              shift_percent = 2 #needed for regime shift simulation
+                              input_type = 'base' #needed to allow for this value to work in the simulation comparisons later
                              ) 
 simTime <- 100*12
 
 #rate of change function
-dCdt_OnePool <- function(t, y, parms, rel_tol = 1e-8){ #
+dCdt_OnePool.fn <- function(t, y, parms, rel_tol = 1e-8){ #
   y <- unname(y)
   CO2 <- y[1] 
   soil <- y[2]
   
+  if(! all(c('input_type', 'turnoverTime', 'inputs') %in% names(parms))){
+    stop('You have a parameter missing that this function needs.')
+  }
   
   if(parms$input_type == 'seasonal'){
       inputs <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300) #offset by the parms$input parameter
     }else if(parms$input_type == 'incubation'){
       inputs <- 0
     }else if(parms$input_type == 'regime shift'){
-      if(t>10){
+        if(! all(c('shift_percent', 'shift_time') %in% names(parms))){
+        stop('You have a parameter missing that this function needs.')
+          }
+      if(t > parms$shift_time ){
         inputs <- parms$inputs * parms$shift_percent ##double inputs
       }else{
         inputs <- parms$inputs
@@ -83,37 +90,39 @@ dCdt_OnePool <- function(t, y, parms, rel_tol = 1e-8){ #
   dSoil <- inputs - soil / parms$turnoverTime
 
   
-  #if wer're not doing a zero-input run...
+  #if we're not doing a zero-input run...
   if(inputs != 0){ 
+    
+    # print(paste("dC02", dCO2))
+    # print(paste("dSoil", dSoil))
+    # print(paste("Relative Tolerance", rel_tol))
+    
     #make a relative tolerance to ensure conservation of mass
     if(abs(inputs - (dCO2 + dSoil))/inputs > rel_tol){ 
       #relative tolerance allowance
         stop('Conservation of mass does not hold')
     }
   }
-  return(list(c(G = dCO2, C_total = dSoil)))
+  return(list(c(Cummulative_Respiration = dCO2, C_total = dSoil)))
 }
 
 #steady state function
-SS_OnePool <- function(parms){
+SS_OnePool.fn <- function(parms){
     ans <- parms$inputs * parms$turnoverTime
-  return(c(G = 0, C = ans))
+  return(c(Cummulative_Respiration = 0, C = ans))
 }
 
-#Test with different input scenarios
-#clean up plot
-#different chunks for different scenarios
 
-ggplot(lsoda(y = SS_OnePool(parms=Parameters_OnePool.ls)*0.7,
+ggplot(lsoda(y = SS_OnePool.fn(parms=Parameters_OnePool.ls)*0.7,
                 times = seq(0, simTime, by = 1/10),
-                func = dCdt_OnePool,
+                func = dCdt_OnePool.fn,
                 parms = Parameters_OnePool.ls) %>%
           as.data.frame()
        ) + 
   geom_line(aes(x=time, y=C)) +
-  geom_line(data = lsoda(y = SS_OnePool(Parameters_OnePool.ls),
+  geom_line(data = lsoda(y = SS_OnePool.fn(Parameters_OnePool.ls),
                 times = seq(0, simTime, by = 1/10),
-                func = dCdt_OnePool,
+                func = dCdt_OnePool.fn,
                 parms = Parameters_OnePool.ls) %>%
           as.data.frame(), aes(x=time, y=C), linetype="dotted")
 
@@ -223,7 +232,7 @@ Varying_Century_Parameters.ls <- list(
 
 
 Parameters_FivePool.ls <- list(
-                    input_type = 'base', #options: seasonal, incubation
+                    input_type = 'base', #options: seasonal, incubation, regime shift
                     inputs = 0.2/12, #monthly; divided evenly between the months
                       input_to_struc = Varying_Century_Parameters.ls$SMsplit,  
                       input_to_meta = 1-Varying_Century_Parameters.ls$SMsplit,  
@@ -307,7 +316,7 @@ dCdt_FivePool.fn <- function(t, #vector of times
                              y, #
                              parms, 
                              rel_tol=1e-8){ 
-  G <- y[1]
+
   pools <- matrix(y[2:6], nrow=5)
   allocation_vector <- matrix(c(parms$input_to_meta, 
                                 parms$input_to_fast, 
@@ -341,17 +350,28 @@ dCdt_FivePool.fn <- function(t, #vector of times
   #               shift_percent = 2)
   # t <- 11  #seq(0,24, by = 1)
   
+  
+  if(! all(c('input_type', 'inputs', 'input_to_struc', 'input_to_meta', 'input_to_fast', 'input_to_slow', 'input_to_passive', 'turnoverTime_meta', 'turnoverTime_fast', 'turnoverTime_struc', 'turnoverTime_slow', 'turnoverTime_passive','struc_to_fast', 'struc_to_slow', 'meta_to_fast', 'fast_to_slow', 'meta_to_struc', 'meta_to_slow', 'meta_to_passive', 'struc_to_meta', 'struc_to_passive', 'fast_to_meta', 'slow_to_meta', 'passive_to_meta', 'fast_to_struc', 'slow_to_struc', 'passive_to_struc', 'fast_to_slow', 'fast_to_passive', 'slow_to_fast', 'slow_to_passive', 'passive_to_fast', 'passive_to_slow' ) %in% names(parms))){
+    stop('You have a parameter missing that this function needs.')
+  }
+
   if(parms$input_type == 'seasonal'){
       inputs <- (5/300)*sin((pi/6)*t+(3*pi/2))+(5/300) #offset by the parms$input parameter
     }else if(parms$input_type == 'incubation'){
       inputs <- 0
-    }else if(parms$input_type == 'regimeshift'){
-      if(t > 10){
+    }else if(parms$input_type == 'regime shift'){
+        if(! all(c('shift_percent', 'shift_time') %in% names(parms))){
+        stop('You have a regime shift parameter missing that this function needs.')
+          }
+      if(t > parms$shift_time){
+        #print('*')
         inputs <- parms$inputs * parms$shift_percent ##double inputs
       }else{
+        #print('-')
         inputs <- parms$inputs
       }
     }else{
+      #print('^')
       inputs <- parms$inputs
     } 
   
@@ -373,7 +393,7 @@ dCdt_FivePool.fn <- function(t, #vector of times
   }
   
   return(list(c(
-           G = total_resp,
+           Cummulative_Respiration = total_resp,
            Lit_metabolic = ans[1],
            Soil_fast = ans[2],
            Lit_structural = ans[3],
@@ -389,27 +409,30 @@ dCdt_FivePool.fn <- function(t, #vector of times
 simTime <- c(0:1500,seq(1500+1, 10000*4, by=100))
 
 #simulation at partial steady state
-SpinUp_FivePool_sim.df <- lsoda(y = c(G=0, 
+SpinUp_FivePool_sim.df <- lsoda(y = c(Cummulative_Respiration=0, 
                             SS_FivePool.fn(parms = Parameters_FivePool.ls)*0.75),
+                      times = simTime,
+                      func = dCdt_FivePool.fn,
+                      parms = Parameters_FivePool.ls) %>%
+                  as.data.frame() %>%
+                  mutate(C_total = Lit_metabolic + Lit_structural + Soil_fast + Soil_slow + Soil_passive) %>%
+                  mutate(RespirationRate = dCdt_FivePool.fn(t = time, 
+                                                            y = c(NA, Lit_metabolic, Soil_fast, Lit_structural, Soil_slow, Soil_passive),
+                                                            parms = Parameters_FivePool.ls)[[1]]['Cummulative_Respiration'],
+                          .by = everything()
+                         )
+
+
+#simulation at steady state
+SS_FivePool_sim.df <- lsoda(y = c(Cummulative_Respiration=0, 
+                            SS_FivePool.fn(parms = Parameters_FivePool.ls)),
                       times = simTime,
                       func = dCdt_FivePool.fn,
                       parms = Parameters_FivePool.ls) %>%
                   as.data.frame() %>%
                   mutate(C_total = Lit_metabolic + Lit_structural + Soil_fast + Soil_slow + Soil_passive) 
 
-
-#simulation at steady state
-SS_FivePool_sim.df <- lsoda(y = c(G=0, 
-                            SS_FivePool.fn(parms = Parameters_FivePool.ls)),
-                      times = simTime,
-                      func = dCdt_FivePool.fn,
-                      parms = Parameters_FivePool.ls) %>%
-                  as.data.frame() %>%
-                  mutate(C_total = Lit_metabolic + Lit_structural + Soil_fast + Soil_slow + Soil_passive) # %>%.  
-                  #rename_with(.fn = ~paste0(.x, '_SS'), 
-                  #            .cols = Lit_metabolic:C_total).   ##Went with a different method for graphing, created a simulation marker column instead of changin the column names
-
-#creates a dataframe to graph both the steady state lines and the spinup
+#creates a dataframe to graph both the steady state line and the spinup
 Spinup_FivePool_graph.df <- full_join(SpinUp_FivePool_sim.df %>% 
                                pivot_longer(cols = Lit_metabolic:Soil_passive,
                                   names_to = 'pool',
@@ -441,6 +464,11 @@ ggplot(Spinup_FivePool_graph.df %>%
   geom_area(aes(x=time, y=stock, fill = pool)) +
   scale_fill_brewer(palette = "Spectral") +
   scale_x_log10() 
+
+#Respiration Rate test graph:
+ggplot(SpinUp_FivePool_sim.df) +
+  geom_line(aes(x=time, y=RespirationRate)) +
+  scale_x_log10()
 ```
 
 # An Aggregate Decay Rate
@@ -497,20 +525,25 @@ Proxy_decayrate.fn <- function(parms){
 Parameters_FivePool.ls$turnoverTime <- Proxy_decayrate.fn(parms = Parameters_FivePool.ls)
 
 #Simulation with the one-pool model
-SpinUp_Proxy_sim.df <- lsoda(y = c(G=0, 
+SpinUp_Proxy_sim.df <- lsoda(y = c(Cummulative_Respiration=0, 
                                     C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))*0.75),
                                     times = simTime,
-                                    func = dCdt_OnePool,
+                                    func = dCdt_OnePool.fn,
                                     parms = Parameters_FivePool.ls) %>%
-                          as.data.frame() 
+                          as.data.frame() %>%
+                  mutate(RespirationRate = dCdt_OnePool.fn(t = NA, 
+                                                            y = c(NA, C_total),
+                                                            parms = Parameters_FivePool.ls)[[1]]['Cummulative_Respiration'],
+                          .by = everything()
+                  )
 
 
 ggplot(SpinUp_Proxy_sim.df) + 
   geom_line(aes(x=time, y=C_total)) +
-  geom_line(data = lsoda(y = c(G=0, 
+  geom_line(data = lsoda(y = c(Cummulative_Respiration=0, 
                                 C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                           times = simTime,
-                          func = dCdt_OnePool,
+                          func = dCdt_OnePool.fn,
                           parms = Parameters_FivePool.ls) %>%
                             as.data.frame() , 
             aes(x=time, y=C_total), linetype="dotted") +
@@ -558,9 +591,9 @@ ggplot(Spinup_comp_graph.df %>% filter(outcome == 'Total SOC')) +
   xlim(0,1000)
 
 ggplot(Spinup_comp_graph.df %>% filter(outcome == 'Soil Respiration')) + 
-  geom_line(aes(x=time, y=stock, color=sim, linetype=sim), alpha = 0.9) +
-  xlim(0,500) + 
-  ylim(0,8.5)
+  geom_line(aes(x=time, y=stock, color=sim, linetype=sim), alpha = 0.9) #+
+  #xlim(0,500) + 
+  #ylim(0,8.5)
   
 
 ```
@@ -649,7 +682,7 @@ ggplot(Incub_FivePool_graph.df %>%
 Incub_Proxy_graph.df <- lsoda(y = c(G=0, 
                                     C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                                     times = simTime,
-                                    func = dCdt_OnePool,
+                                    func = dCdt_OnePool.fn,
                                     parms = Parameters_FivePool.ls) %>%
                           as.data.frame() 
 
@@ -659,7 +692,7 @@ ggplot(Incub_Proxy_graph.df) +
   geom_line(data = lsoda(y = c(G=0, 
                                 C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                           times = simTime,
-                          func = dCdt_OnePool,
+                          func = dCdt_OnePool.fn,
                           parms = Parameters_FivePool.ls) %>%
                             as.data.frame() , 
             aes(x=time, y=C_total), linetype="dotted") +
@@ -780,12 +813,17 @@ ggplot(Season_FivePool_graph.df %>%
 
 
 #Simulation with the one-pool model
-Season_Proxy_sim.df <- lsoda(y = c(G=0, 
+Season_Proxy_sim.df <- lsoda(y = c(Cummulative_Respiration=0, 
                                     C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                                     times = simTime,
-                                    func = dCdt_OnePool,
+                                    func = dCdt_OnePool.fn,
                                     parms = Parameters_FivePool.ls) %>%
-                          as.data.frame() 
+                          as.data.frame() %>%
+                  mutate(RespirationRate = dCdt_OnePool.fn(t = NA, 
+                                                            y = c(0, C_total),
+                                                            parms = Parameters_FivePool.ls)[[1]]['Cummulative_Respiration'],
+                          .by = everything()
+                  )
 
 
 ggplot(Season_Proxy_sim.df) + 
@@ -793,10 +831,13 @@ ggplot(Season_Proxy_sim.df) +
   geom_line(data = lsoda(y = c(G=0, 
                                 C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                           times = simTime,
-                          func = dCdt_OnePool,
+                          func = dCdt_OnePool.fn,
                           parms = Parameters_FivePool.ls) %>%
                             as.data.frame() , 
             aes(x=time, y=C_total), linetype="dotted") 
+
+ggplot(Season_Proxy_sim.df) + 
+  geom_line(aes(x=time, y=RespiratonRate))
 
 ```
 How does the one-pool proxy decay rate compare?
@@ -870,6 +911,7 @@ How does this aggregate decay rate compare to the full model when a regime shift
 
 Parameters_FivePool.ls$input_type <- 'regime shift'
 Parameters_FivePool.ls$shift_percent <- 2 #doubles the inputs
+Parameters_FivePool.ls$shift_time <- 12 #regime shift occurs one year into simulation
 
 simTime <- seq(0, 12*100, by=.5)
 
@@ -885,36 +927,35 @@ Regime_FivePool_sim.df <- lsoda(y = c(G=0,
                   mutate(C_total = Lit_metabolic + Lit_structural + Soil_fast + Soil_slow + Soil_passive) 
 
 
-#Runs steady states for the new regime as well as the original
-Regime_SSs_sim.df <- full_join(lsoda(y = c(G=0, 
-                                          SS_FivePool.fn(parms = Parameters_FivePool.ls)*Parameters_FivePool.ls$shift_percent),
-                                      times = simTime,
-                                      func = dCdt_FivePool.fn,
-                                      parms = Parameters_FivePool.ls) %>%
-                                  as.data.frame() %>%
-                                  mutate(C_total = Lit_metabolic + Lit_structural + Soil_fast + Soil_slow + Soil_passive) %>%
-                                  pivot_longer(cols = Lit_metabolic:Soil_passive,
-                                      names_to = 'pool',
-                                      values_to = 'stock') %>%
-                                  mutate(sim = "New Regime Steady State") %>%
-                                  select(time, pool, stock, sim), 
-                              SS_FivePool_sim.df  %>% 
-                                  filter(time <= 12*100) %>%
-                                  pivot_longer(cols = Lit_metabolic:Soil_passive,
-                                      names_to = 'pool',
-                                      values_to = 'stock') %>%
-                                  mutate(sim = "Original Regime Steady State") %>%
-                                  select(time, pool, stock, sim)
-)
+# #Runs steady states for the new regime as well as the original
+# Regime_SSs_sim.df <- full_join(lsoda(y = c(G=0, 
+#                                           SS_FivePool.fn(parms = Parameters_FivePool.ls)*Parameters_FivePool.ls$shift_percent),
+#                                       times = simTime,
+#                                       func = dCdt_FivePool.fn,
+#                                       parms = Parameters_FivePool.ls) %>%
+#                                   as.data.frame() %>%
+#                                   mutate(C_total = Lit_metabolic + Lit_structural + Soil_fast + Soil_slow + Soil_passive) %>%
+#                                   pivot_longer(cols = Lit_metabolic:Soil_passive,
+#                                       names_to = 'pool',
+#                                       values_to = 'stock') %>%
+#                                   mutate(sim = "New Regime Steady State") %>%
+#                                   select(time, pool, stock, sim), 
+#                               SS_FivePool_sim.df  %>% 
+#                                   filter(time <= 12*100) %>%
+#                                   pivot_longer(cols = Lit_metabolic:Soil_passive,
+#                                       names_to = 'pool',
+#                                       values_to = 'stock') %>%
+#                                   mutate(sim = "Original Regime Steady State") %>%
+#                                   select(time, pool, stock, sim)
+# )
 
 
 #creates a dataframe to graph both the steady state lines and the spinup
-Regime_FivePool_graph.df <- full_join(Regime_FivePool_sim.df %>% 
-                               pivot_longer(cols = Lit_metabolic:Soil_passive,
-                                  names_to = 'pool',
-                                  values_to = 'stock') %>%
-                                  mutate(sim = "RegimeShift"), 
-                             Regime_SSs_sim.df)
+Regime_FivePool_graph.df <- Regime_FivePool_sim.df %>% 
+                                        pivot_longer(cols = Lit_metabolic:Soil_passive,
+                                                     names_to = 'pool',
+                                                     values_to = 'stock') %>%
+                                        mutate(sim = "RegimeShift")
 
 
 #Setting the Factor allows the pools to show up in the 'right' order
@@ -923,8 +964,8 @@ Regime_FivePool_graph.df$pool <- factor(Regime_FivePool_graph.df$pool, levels = 
 
 #Graph by pools:
 ggplot(Regime_FivePool_graph.df %>% filter(sim == "RegimeShift")) +
-  geom_line(aes(x=time, y=stock)) + #, linetype=sim)) +
-  facet_wrap(~ pool, ncol=1, scales='free') +   
+  geom_line(aes(x=time, y=stock)) + 
+  facet_wrap(~ pool, scales='free') +   
   #scale_x_log10() +  #Comment this line to get time -not- scaled by a log value
   theme_bw()
 
@@ -932,8 +973,8 @@ ggplot(Regime_FivePool_graph.df %>% filter(sim == "RegimeShift")) +
 ggplot(Regime_FivePool_graph.df %>%
         filter(sim == 'RegimeShift')) +
   geom_area(aes(x=time, y=stock, fill = pool)) +
-  scale_fill_brewer(palette = "Spectral") +
-  scale_x_log10() 
+  scale_fill_brewer(palette = "Spectral") #+
+#  scale_x_log10() 
 
 
 
@@ -941,7 +982,7 @@ ggplot(Regime_FivePool_graph.df %>%
 Regime_Proxy_sim.df <- lsoda(y = c(G=0, 
                                     C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                                     times = simTime,
-                                    func = dCdt_OnePool,
+                                    func = dCdt_OnePool.fn,
                                     parms = Parameters_FivePool.ls) %>%
                           as.data.frame() 
 
@@ -951,12 +992,12 @@ ggplot(Regime_Proxy_sim.df) +
   geom_line(data = lsoda(y = c(G=0, 
                                 C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                           times = simTime,
-                          func = dCdt_OnePool,
+                          func = dCdt_OnePool.fn,
                           parms = Parameters_FivePool.ls) %>%
                             as.data.frame() , 
-            aes(x=time, y=C_total), linetype="dotted") +
+            aes(x=time, y=C_total), linetype="dotted") #+
   #scale_x_log10()
-  xlim(0,150)
+  #xlim(0,150)
 
 ```
 How does the one-pool proxy decay rate compare?
@@ -990,8 +1031,8 @@ ggplot(RegimeShift_sim.df %>%
 ggplot(RegimeShift_sim.df %>% 
          filter(outcome == 'Soil Respiration')
        ) + 
-  geom_line(aes(x=time, y=stock, color=sim, linetype=sim), alpha = 0.75) +
-  xlim(0,3000) 
+  geom_line(aes(x=time, y=stock, color=sim, linetype=sim), alpha = 0.75) #+
+#  lim(0,3000) 
   
 
 ```
@@ -1026,7 +1067,7 @@ ggplot(RegimeShift_sim.df %>%
 (Blurb about NEWMODEL studies)
 
 
-```{r NEWMODEL}
+```{r NEWMODEL, eval=FALSE}
 Parameters_FivePool.ls$input_type <- 'regime shift'
 
 #simulation for Inbuation
@@ -1077,7 +1118,7 @@ ggplot(NEWMODEL_FivePool_graph.df %>%
 NEWMODEL_Proxy_sim.df <- lsoda(y = c(G=0, 
                                     C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                                     times = simTime,
-                                    func = dCdt_OnePool,
+                                    func = dCdt_OnePool.fn,
                                     parms = Parameters_FivePool.ls) %>%
                           as.data.frame() 
 
@@ -1087,7 +1128,7 @@ ggplot(Proxy_NEWMODEL_sim.df) +
   geom_line(data = lsoda(y = c(G=0, 
                                 C_total = sum(SS_FivePool.fn(parms=Parameters_FivePool.ls))),
                           times = simTime,
-                          func = dCdt_OnePool,
+                          func = dCdt_OnePool.fn,
                           parms = Parameters_FivePool.ls) %>%
                             as.data.frame() , 
             aes(x=time, y=C_total), linetype="dotted") +
@@ -1097,7 +1138,7 @@ ggplot(Proxy_NEWMODEL_sim.df) +
 ```
 How does the one-pool proxy decay rate compare?
 
-```{r NEWMODELCompare}
+```{r NEWMODELCompare, eval=FALSE}
 #Clean up the dataframes produced and create a new one to plot
 NEWMODEL_sim.df <- full_join(NEWMODEL_FivePool_sim.df %>%
                                     select('time', 'G', 'C_total') %>%
@@ -1131,7 +1172,7 @@ ggplot(NEWMODEL_sim.df %>% filter(outcome == 'Soil Respiration')) +
 
 Now let's see the comparison:
 
-```{r NEWMODELModel2ModelComp}
+```{r NEWMODELModel2ModelComp, eval=FALSE}
 #difference drive graph for SOC
 ggplot(NEWMODEL_sim.df %>% 
          pivot_wider(names_from = sim,
