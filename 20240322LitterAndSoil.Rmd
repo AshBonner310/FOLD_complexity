@@ -971,7 +971,7 @@ ggplot(Season_Proxy_sim.df) +
 ```
 How does the one-pool proxy decay rate compare?
 
-```{r IncCompare}
+```{r SeasonalCompare}
 #Clean up the dataframes produced and create a new one to plot
 Seasonal_sim.df <- full_join(Season_FivePool_sim.df %>%
                                     select('time', 'C_total', 'RespirationRate') %>%
@@ -991,18 +991,24 @@ Seasonal_sim.df <- full_join(Season_FivePool_sim.df %>%
                              )
 
 
-ggplot(Seasonal_sim.df %>% filter(outcome == 'Total SOC')) + 
+Season_Stocks.gr<- ggplot(Seasonal_sim.df %>% filter(outcome == 'Total SOC')) + 
   geom_line(aes(x=time, y=stock, color=sim)) 
 
-ggplot(Seasonal_sim.df %>% filter(outcome == 'Soil Respiration')) + 
+Season_Resp.gr<- ggplot(Seasonal_sim.df %>% filter(outcome == 'Soil Respiration')) + 
   geom_line(aes(x=time, y=stock, color=sim)) 
+
+Season_Stocks.gr + 
+    labs(title = "Seasonal Soil Organic C", x="Time (years)", y="kg-C per m^2") + 
+Season_Resp.gr + 
+    labs(title = "SeasonalRespiration Rates", x="Time (years)", y="kg-C per m^2 per month") + 
+  plot_layout(guides = "collect", axis_titles = "collect")
 
 ```
 
 
 Now let's see the comparison:
 
-```{r IncModel2ModelComp}
+```{r SeasonalModel2ModelComp}
 #difference drive graph for SOC
 ggplot(Seasonal_sim.df %>% 
          pivot_wider(names_from = sim,

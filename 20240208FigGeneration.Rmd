@@ -56,6 +56,20 @@ Incub_Resp.gr +
     labs(title = "Incubation Respiration Rates", x="Time (years)", y="kg-C per m^2 per month") + 
   plot_layout(guides = "collect", axis_titles = "collect")
 
+Season_Stocks.gr + 
+    labs(title = "Seasonal Soil Organic C", x="Time (years)", y="kg-C per m^2") + 
+Season_Resp.gr + 
+    labs(title = "Seasonal Respiration Rates", x="Time (years)", y="kg-C per m^2 per month") + 
+  plot_layout(guides = "collect", axis_titles = "collect")
+
+```
+
+
+```{r FinalFigure}
+standardize_input_graph.fn(Constant_Inputs) + standardize_input_graph.fn(SpinUp_Resp.gr) + 
+standardize_input_graph.fn(Incub_Inputs) + standardize_input_graph.fn(Incub_Resp.gr) + 
+standardize_input_graph.fn(Seasonal_Inputs) + standardize_input_graph.fn(Season_Resp.gr) + 
+  plot_layout(nrow=3, guides = "collect")
 
 
 ```
