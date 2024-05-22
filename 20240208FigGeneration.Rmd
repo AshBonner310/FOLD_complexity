@@ -6,25 +6,36 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse) #data library
+library(patchwork) #figure arrangement
+library(dplyr) #data wrangling
+
 ```
 
-## R Markdown
+## Inputs
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Our Inputs all have the following graphs:
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r inputs}
+max_input <- max(SimulationInputs.df$constant, SimulationInputs.df$incubation, SimulationInputs.df$seasonal, RegimeInputs$'regime shift')
 
-```{r cars}
-summary(cars)
+standardize_input_graph.fn <- function(graph){
+  
+  updated_graph <- graph + 
+    theme_minimal() +
+    ylim(0,max_input) +
+    # labs(x = "Time since start of simulation (years)",
+    #      y = "Organic Carbon as a proportion of NPP (kg C per m^2)") + 
+    labs(x = "",
+         y = "")
+    
+  return(updated_graph)
+}
+
+
+standardize_input_graph.fn(Constant_Inputs + labs(title="Constant Inputs")) + standardize_input_graph.fn(Incub_Inputs+ labs(title="Incubation")) + standardize_input_graph.fn(Seasonal_Inputs+ labs(title="Seasonal Variation")) + standardize_input_graph.fn(Regime_Inputs+ labs(title="Regime Shift")) +                                                    plot_layout(nrow = 1, byrow = FALSE)
+
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
