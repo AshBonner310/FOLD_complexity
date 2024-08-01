@@ -19,7 +19,7 @@ library(dplyr) #data wrangling
 Our Inputs all have the following graphs:
 
 ```{r inputs}
-max_input <- max(SimulationInputs.df$constant, SimulationInputs.df$incubation, SimulationInputs.df$seasonal, RegimeInputs$'regime shift')
+max_input <- max(SimulationInputs.df$constant, SimulationInputs.df$incubation, SimulationInputs.df$seasonal, RegimeInputs$'regime shift')*1.1
 
 standardize_input_graph.fn <- function(graph){
   
@@ -28,14 +28,14 @@ standardize_input_graph.fn <- function(graph){
     ylim(0,max_input) +
     # labs(x = "Time since start of simulation (years)",
     #      y = "Organic Carbon as a proportion of NPP (kg C per m^2)") + 
-    labs(x = "",
-         y = "")
+    labs(x = "Time (years)",
+         y = "kg-C per m^2 per month")
     
   return(updated_graph)
 }
 
 
-standardize_input_graph.fn(Constant_Inputs + labs(title="Constant Inputs")) + standardize_input_graph.fn(Incub_Inputs + labs(title="Incubation") + xlim(0,3)) + standardize_input_graph.fn(Seasonal_Inputs+ labs(title="Seasonal Variation") + xlim(0,5)) + standardize_input_graph.fn(Regime_Inputs+ labs(title="Regime Shift")) +                                                    plot_layout(nrow = 1, byrow = FALSE)
+standardize_input_graph.fn(Constant_Inputs + labs(title="Constant Inputs")) + standardize_input_graph.fn(Incub_Inputs + labs(title="Incubation") + xlim(0,3)) + standardize_input_graph.fn(Seasonal_Inputs+ labs(title="Seasonal Variation") + xlim(0,5)) + standardize_input_graph.fn(Regime_Inputs+ labs(title="Regime Shift")) +                                                    plot_layout(nrow = 1, byrow = FALSE, axis_titles = "collect")
 
 ```
 
@@ -49,7 +49,6 @@ SpinUp_Resp.gr +
     labs(title = "Spin-Up Respiration Rates", x="Time (years)", y="kg-C per m^2 per month") + 
   plot_layout(guides = "collect", axis_titles = "collect")
 
-
 Incub_Stocks.gr + 
     labs(title = "Incubation Soil Organic C", x="Time (years)", y="kg-C per m^2") + 
 Incub_Resp.gr + 
@@ -62,6 +61,14 @@ Season_Resp.gr +
     labs(title = "Seasonal Respiration Rates", x="Time (years)", y="kg-C per m^2 per month") + 
   plot_layout(guides = "collect", axis_titles = "collect")
 
+Regime_Stocks.gr + 
+    labs(title = "Regime Shift Soil Organic C", x="Time (years)", y="kg-C per m^2") + 
+Regime_Resp.gr + 
+    labs(title = "Regime Shift Respiration Rates", x="Time (years)", y="kg-C per m^2 per month") + 
+  plot_layout(guides = "collect", axis_titles = "collect")
+
+
+
 ```
 
 
@@ -69,8 +76,20 @@ Season_Resp.gr +
 standardize_input_graph.fn(Constant_Inputs) + standardize_input_graph.fn(SpinUp_Resp.gr) + 
 standardize_input_graph.fn(Incub_Inputs) + standardize_input_graph.fn(Incub_Resp.gr) + 
 standardize_input_graph.fn(Seasonal_Inputs) + standardize_input_graph.fn(Season_Resp.gr) + 
-  plot_layout(nrow=3, guides = "collect")
+standardize_input_graph.fn(Regime_Inputs) + standardize_input_graph.fn(Regime_Resp.gr) + 
+  plot_layout(nrow=4, guides = "collect", axis_titles = "collect") +
+  plot_annotation(title = "Carbon Rates",
+                  theme = theme(plot.title = element_text(size = 18)))
 
 
+Respiration_test <- standardize_input_graph.fn(Constant_Inputs) + 
+    standardize_input_graph.fn(Incub_Inputs) + 
+    standardize_input_graph.fn(Seasonal_Inputs) + 
+    standardize_input_graph.fn(Regime_Inputs) + 
+  standardize_input_graph.fn(SpinUp_Resp.gr) + inset_element(SpinUp_Resp_comp.gr, 0.6, 0.6, 1, 1) + 
+   standardize_input_graph.fn(Incub_Resp.gr) + inset_element(Incub_Resp_comp.gr, 0.6, 0.6, 1, 1) + 
+   standardize_input_graph.fn(Season_Resp.gr) + inset_element(Season_Resp_comp.gr, 0.6, 0.6, 1, 1) + 
+   standardize_input_graph.fn(Regime_Resp.gr) + inset_element(Regime_Resp_comp.gr, 0.6, 0.1, 1, 0.7) + 
+  plot_layout(ncol=2,nrow = 4,  byrow=FALSE, guides="collect", axis_titles = "collect")
 ```
 
