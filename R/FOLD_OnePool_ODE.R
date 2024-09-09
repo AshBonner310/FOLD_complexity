@@ -5,9 +5,9 @@
 #' $$ \frac{dC}{dt} = u(t) - kC$$
 #' 
 #' where $u(t)$ represents carbon inputs (which can change over time due to seasonal values, regime shifts, experiments, etc.), and the decay rate $k$ represents the inverse of turnover time $\frac{1}{\tau}$ (turnover time being the average time carbon is expected to remain in the soil before cycling out).
-#' This model 
 #' 
-#' @param t A sequence of time values, at whatever resolution desired. This model is designed to run in a monthly timestep.
+#' 
+#' @param t A sequence of time values, at whatever resolution desired. This model is designed to run in a yearly timestep.
 #' 
 #' @param y A vector containing two named elements, CO2 and soil, in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cumulative CO2 released.
 #' 
@@ -28,19 +28,21 @@ OnePool_ODE.fn <- function(t,
   CO2 <- y[1] 
   soil <- y[2]
   
-  if(! all(c('turnoverTime', 'inputs') %in% names(parms))){
+  if(! all(c('turnoverTime', 'inputs.fn') %in% names(parms))){
     stop('You have a parameter missing that this function needs.')
   }
   
-  if(typeof(parms$inputs) == 'list'){
-    
-    u <- Scenario_Inputs.df[t, "Carbon"]
-    
-  }else{
-    
-    u <- parms$inputs
-    
-  }
+  # if(typeof(parms$inputs) == 'list'){
+  #   
+  #   u <- Scenario_Inputs.df[t, "Carbon"]
+  #   
+  # }else{
+  #   
+  #   u <- parms$inputs
+  #   
+  # }
+  
+  u <- parms$inputs.fn(time=t, parms=parms)
   
   dCO2 <- soil / parms$turnoverTime
   dSoil <- u - soil / parms$turnoverTime

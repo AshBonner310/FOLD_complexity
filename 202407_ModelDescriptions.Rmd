@@ -25,22 +25,38 @@ or
 
 $$\frac{dC}{dt} = u(t) - \frac{1}{\tau}C. $$
 
- - $u(t)$ is carbon inputs, which can change over time. This is in mass concentration per time, specifically kgC meters$^{-2}$ month$^{-1}$. 
- - $k$ is a decay rate equal to the inverse of turnover time.
+ - $u(t)$ is carbon inputs, which can change over time. This is in mass concentration per time, specifically kgC meters$^{-2}$ year$^{-1}$. 
+ - $k$ is a decay rate equal to the inverse of turnover time ($\tau$).
 
 
 ```{r OnePoolSetup}
 
 source("R/FOLD_OnePool_ODE.R")
 
-#params
-Params_OnePool.ls <- list(inputs = 0.2/12, 
-                                #u; [0, 2.5] kg-carbon m-2 yr-1; split per month (to fit CENTURY parameters)
-                              turnoverTime = 15*12
-                                #\tau; [10, 50] yr, by month
-                             ) 
+incubation_function <- function(time, parms){
+  return(0)
+}
 
-SimTimes <- seq(0, 100*12, by = 1) #one hundred years, monthly
+constant_function <- function(time, parms){
+  return(parms$const_inputs)
+}
+
+seasonal_function <- function(time, parms){
+  inputs <- (5/300)*sin((pi/6)*time+(3*pi/2))+(5/300) 
+  return(inputs)
+}
+
+#params
+Params_OnePool.ls <- list(const_inputs = 0.26, 
+                                #u; [0, 2.5] kg-carbon m-2 yr-1
+                          turnoverTime = 20
+                                #\tau; [10, 50] yr
+                          
+)
+
+Params_OnePool.ls$inputs.fn <- constant_function
+
+SimTimes <- seq(0, 100, by = 1/12) #one hundred years, monthly
 
 ```
 
@@ -48,7 +64,7 @@ SimTimes <- seq(0, 100*12, by = 1) #one hundred years, monthly
 
 ```{r}
 
-Sim.df <- lsoda(y = c("Cumulative_Respiration" = 0, "Soil_Carbon_Concentration" = 0),
+Sim1.df <- lsoda(y = c("Cumulative_Respiration" = 0, "Soil_Carbon_Concentration" = 0),
                 times = SimTimes,
                 func = OnePool_ODE.fn,
                 parms = Params_OnePool.ls) %>%
@@ -60,10 +76,10 @@ Sim.df <- lsoda(y = c("Cumulative_Respiration" = 0, "Soil_Carbon_Concentration" 
           .by = everything()
     )
 
-ggplot(Sim.df %>% pivot_longer(cols = Cumulative_Respiration:Respiration_Rate,
+ggplot(Sim1.df %>% pivot_longer(cols = Cumulative_Respiration:Respiration_Rate,
                                names_to = "Pool",
                                values_to = "Mass")) + 
-  geom_line(aes(x=time/12, y=Mass)) + 
+  geom_line(aes(x=time, y=Mass)) + 
   facet_wrap(~ Pool, ncol=1, scales='free') + 
   xlab("Time (years)") +
   ylab("Mass in kg C per m^2" )
@@ -79,11 +95,11 @@ $$\frac{dC}{dt} = 0 \implies C = u(t) \cdot \tau$$
 ```{r SteadyState}
 
 SS_OnePool.fn <- function(parms){
-    ans <- parms$inputs * parms$turnoverTime
+    ans <- parms$const_inputs * parms$turnoverTime
   return(c(Cummulative_Respiration = 0, Soil_Carbon_Concentration = ans))
 }
 
-Sim_SS.df <- lsoda(y = SS_OnePool.fn(parms = Params_OnePool.ls),
+Sim1_SS.df <- lsoda(y = SS_OnePool.fn(parms = Params_OnePool.ls),
                 times = SimTimes,
                 func = OnePool_ODE.fn,
                 parms = Params_OnePool.ls) %>%
@@ -95,17 +111,25 @@ Sim_SS.df <- lsoda(y = SS_OnePool.fn(parms = Params_OnePool.ls),
           .by = everything()
     )
 
+#Verfication of Steady State:
+ggplot(Sim1_SS.df %>% pivot_longer(cols = Cummulative_Respiration:Respiration_Rate,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  xlab("Time (years)") +
+  ylab("Mass in kg C per m^2" )
 
 ```
 
 
 
 
-# The Five-Pool CENTURY Model
+# The Five-Pool Model: Century
 
 A five-pool decay model featuring two litter pools and three soil pools with varying decay rates throughout, a similar structure to CENTURY [Parton 1987?], considered one of the seminal papers introducing this style of model.
 The decay rates intrinsically represent several processes (mineral-organic associations, microbial uptake or facilitated transformations, moisture- or light-facilitated breakdown etc.), and the carbon that leaves one pool can either be transferred into a different pool or respired out of the system.
-This is overwhelming the model structure of choice, albiet for different numbers of soil and litter pools, for global Earth system models (ESMs) [KTB 2012 paper].
+This is overwhelming the model structure of choice, albiet for different numbers of soil and litter pools, for global Earth system models (ESMs) [KTB 2012].
 
 
 ```{r Diagram, echo = FALSE}
@@ -178,5 +202,245 @@ grViz("
 
 Generally speaking, we can consider models where carbon can move from any pool for another; these arrows represent those fluxes present in CENTURY.
 
+This diagram comes in the form of the matrix ordinary differential equation
+
+$$\frac{d\vec{C}}{dt} = u \vec{b} - \boldsymbol{K}\boldsymbol{A}\vec{C} $$
+where:
+ - $\vec{C}$ is a vector representing the five pools (state variables) in the order from the fastest decay rate to the slowest (more on that later), 
+ - $u$ is the inputs to the system (often estimated as a fraction of vegetation's net primary production),
+ - $\vec{b}$ is a vector that divides up the carbon inputs into the soil system (in Century, this is all into the litter pools)
+ - $\boldsymbol{K}$ is a diagonal matrix with the decay rates of the pools,
+ - $\boldsymbol{A}$ is called the transfer matrix and can be of three different types [diagonal (for a model where the pools are independant and have no fluxes betwen them), lower-triangular (for a cascade model, where carbon flows from simpler forms to more complex forms due to the ecological principal of trophic cascades), or fully dense (for a model that allows carbon to move freely between the pools)]. In any of these three cases, the diagonal entries are all positive one, and the off-diagonal entries are nonpositive (negative or zero), and the columns will always sum to a positive value less than one. 
+
+CENTURY as debuted in 1983 included the effects of temperature and moisture on decomposition, which was applied across all pools the same way, thus we omit it here as the effects of temperature will only serve to scale decomposition of the one-pool model the same as it does on this five-pool model.
+
+```{r FivePoolSetup}
+
+source("R/FOLD_FivePool_ODE.R")
+
+Params_FivePool.ls <- list(
+                  ##Input-based parameters (such as allocation)
+                  inputs = 2.6,
+                        #CENUTRY normalized to 260 grams C per m^2 per year
+                        #u; [0, 2.5] kg-carbon m-2 yr-1, 
+                    input_to_struc = 0.28,  
+                    input_to_meta = 0.72,  
+                        #C goes through litter pools first
+                    input_to_fast = 0,  
+                    input_to_slow = 0,  
+                    input_to_passive = 0,  
+                            
+                  ##turnover times (years)
+                     turnoverTime_meta = .1,  
+                        # CENTURY: .1 to 1 year
+                     turnoverTime_struc = 1.8, 
+                        # CENTURY: 1 to 5 years
+                     turnoverTime_fast = 7.8,  #10
+                     turnoverTime_slow = 42.5, #CENTURY has 50, we have adjusted to reach appropriate ratios as Parton did
+                     turnoverTime_passive = 2000, #CENTURY has 1500, adjusted to reach appropriate ratios (as Parton did)
+                     
+                  ##Transfer Matrix values 
+                       struc_to_fast = .9*.4, 
+                       struc_to_slow = .1*.4, 
+                          #60% lost to respiration, the remaining 40% is called Net Microbial Production and is split between the other pools
+                       meta_to_fast = .4,  
+                          #60% lost to respiration, rest to active
+                       fast_to_slow = .4,      
+                          #60% lost to respiration, rest to slow
+                       slow_to_fast = 0.92*.4,        
+                       slow_to_passive = .08*.4,     
+                          #60% lost to respiration, rest split between active and passive
+                       passive_to_fast = .4,
+                          #60% lost to respiration, rest to slow
+                    
+                      #all the zero-flows
+                        meta_to_struc = 0,
+                        meta_to_slow = 0,
+                        meta_to_passive = 0,
+                        struc_to_meta = 0,
+                        struc_to_passive = 0,
+                        fast_to_passive = 0,
+                        fast_to_meta = 0,
+                        slow_to_meta = 0,
+                        passive_to_meta = 0,
+                        fast_to_struc = 0,
+                        slow_to_struc = 0,     
+                        passive_to_slow = 0,
+                        passive_to_struc = 0
+                       )
+```
+
+##Example: Spin up simulation
+
+```{r Simulation}
+SimTimes <- seq(0, 8000*100, by = 100) 
+
+Sim5.df <- lsoda(y = c(Cumulative_Respiration=0, 
+                       Metabolic_Plant_Residue= 0,
+                       Structural_Plant_Residue=0,
+                       Fast_Soil = 0,
+                       Slow_Soil = 0,
+                       Passive_Soil = 0),
+                      times = SimTimes,
+                      func = FivePool_ODE.fn,
+                      parms = Params_FivePool.ls) %>%
+                  as.data.frame() %>%
+                  mutate(C_total = Metabolic_Plant_Residue + Structural_Plant_Residue + 
+                           Fast_Soil + Slow_Soil + Passive_Soil) %>%
+                  mutate(Respiration_Rate = FivePool_ODE.fn(t = time, 
+                                                            y = c(NA, 
+                                                                  Metabolic_Plant_Residue, Structural_Plant_Residue, 
+                                                                  Fast_Soil, Slow_Soil, Passive_Soil),
+                                                            parms = Params_FivePool.ls
+                                                            )[[1]]['Cumulative_Respiration'],
+                          .by = everything())
+
+ggplot(Sim5.df %>% 
+         select(time, Cumulative_Respiration, C_total, Respiration_Rate) %>%
+         pivot_longer(cols = c(Cumulative_Respiration, C_total, Respiration_Rate),
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  xlab("Time (years)") +
+  ylab("Mass in kg C per m^2" )+
+  scale_x_log10() 
+
+temp <- Sim5.df %>% 
+         select(time, Metabolic_Plant_Residue, Structural_Plant_Residue, Fast_Soil, Slow_Soil, Passive_Soil) %>%
+         pivot_longer(cols = Metabolic_Plant_Residue:Passive_Soil,
+                                  names_to = 'Pool',
+                                  values_to = 'Mass')
+
+temp$Pool <- factor(temp$Pool, levels = c("Metabolic_Plant_Residue", "Structural_Plant_Residue", "Fast_Soil", "Slow_Soil", "Passive_Soil"))
+
+ggplot(temp) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') +
+  scale_x_log10()
+
+ggplot(temp) +
+  geom_area(aes(x=time, y=Mass, fill = Pool)) +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_x_log10()
 
 
+PassPercentage <- (Sim5.df[75001,7]/Sim5.df[75001,8])*100
+SlowPercentage <- (Sim5.df[75001,6]/Sim5.df[75001,8])*100
+FastPercentage <- (Sim5.df[75001,5]/Sim5.df[75001,8])*100
+LitterPercentage <- (Sim5.df[75001,3]+Sim5.df[75001,4]/Sim5.df[75001,8])*100
+
+
+```
+
+```{r SteadyState}
+SS_FivePool.fn <- function(parms){
+  allocation_vector <- matrix(c(parms$input_to_meta, 
+                                parms$input_to_struc, 
+                                parms$input_to_fast, 
+                                parms$input_to_slow, 
+                                parms$input_to_passive),
+                              nrow = 5)
+  
+  decay_matrix <- diag(x= 1/c(parms$turnoverTime_meta,
+                             parms$turnoverTime_struc,
+                             parms$turnoverTime_fast,
+                             parms$turnoverTime_slow,
+                             parms$turnoverTime_passive))
+  
+  
+  transfer_matrix <- matrix(c(
+        #metabolic to pool      #structural to pool     #fast to pool            #slow to pool           #passive to pool
+    1,                      -parms$struc_to_meta,    -parms$fast_to_meta,     -parms$slow_to_meta,    -parms$passive_to_meta,
+    -parms$meta_to_struc,   1,                       -parms$fast_to_struc,    -parms$slow_to_struc,   -parms$passive_to_struc,
+    -parms$meta_to_fast,    -parms$struc_to_fast,    1,                       -parms$slow_to_fast,    -parms$passive_to_fast,
+    -parms$meta_to_slow,    -parms$struc_to_slow,    -parms$fast_to_slow,     1,                      -parms$passive_to_slow,
+    -parms$meta_to_passive, -parms$struc_to_passive, -parms$fast_to_passive,  -parms$slow_to_passive,  1
+  ),
+  nrow = 5,
+  byrow=TRUE)
+  
+  ans <- solve(decay_matrix  %*% transfer_matrix, parms$inputs * allocation_vector)
+
+  return(c(Lit_metabolic = ans[1],
+           Lit_structural = ans[2],
+           Soil_fast = ans[3],
+           Soil_slow = ans[4],
+           Soil_passive = ans[5]))
+}
+
+#Verification of Steady State:
+FivePool_SteadyState <- SS_FivePool.fn(parms=Params_FivePool.ls)
+
+SimTimes <- seq(0, 100, by = 1/12) 
+
+Sim5_SS.df <- lsoda(y = c(Cumulative_Respiration=0, 
+                       Metabolic_Plant_Residue= 0,
+                       Structural_Plant_Residue=0,
+                       Fast_Soil = 0,
+                       Slow_Soil = 0,
+                       Passive_Soil = 0),
+                      times = SimTimes,
+                      func = FivePool_ODE.fn,
+                      parms = Params_FivePool.ls) %>%
+                  as.data.frame() %>%
+                  mutate(C_total = Metabolic_Plant_Residue + Structural_Plant_Residue + 
+                           Fast_Soil + Slow_Soil + Passive_Soil) %>%
+                  mutate(Respiration_Rate = FivePool_ODE.fn(t = time, 
+                                                            y = c(NA, 
+                                                                  Metabolic_Plant_Residue, Structural_Plant_Residue, 
+                                                                  Fast_Soil, Slow_Soil, Passive_Soil),
+                                                            parms = Params_FivePool.ls
+                                                            )[[1]]['Cumulative_Respiration'],
+                          .by = everything())
+
+ggplot(Sim5.df %>% 
+         select(time, Cumulative_Respiration, C_total, Respiration_Rate) %>%
+         pivot_longer(cols = c(Cumulative_Respiration, C_total, Respiration_Rate),
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  xlab("Time (years)") +
+  ylab("Mass in kg C per m^2" )+
+  scale_x_log10() 
+
+temp <- Sim5.df %>% 
+         select(time, Metabolic_Plant_Residue, Structural_Plant_Residue, Fast_Soil, Slow_Soil, Passive_Soil) %>%
+         pivot_longer(cols = Metabolic_Plant_Residue:Passive_Soil,
+                                  names_to = 'Pool',
+                                  values_to = 'Mass')
+
+temp$Pool <- factor(temp$Pool, levels = c("Metabolic_Plant_Residue", "Structural_Plant_Residue", "Fast_Soil", "Slow_Soil", "Passive_Soil"))
+
+ggplot(temp) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') +
+  scale_x_log10()
+
+ggplot(temp) +
+  geom_area(aes(x=time, y=Mass, fill = Pool)) +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_x_log10()
+
+
+
+#More testing:
+
+(FivePool_SteadyState/sum(FivePool_SteadyState))*100
+
+FivePool_SteadyState
+
+transfer_matrix <- matrix(c(
+        #metabolic to pool      #structural to pool     #fast to pool            #slow to pool           #passive to pool
+    1,                      -Params_FivePool.ls$struc_to_meta,    -Params_FivePool.ls$fast_to_meta,     -Params_FivePool.ls$slow_to_meta,    -Params_FivePool.ls$passive_to_meta,
+    -Params_FivePool.ls$meta_to_struc,   1,                       -Params_FivePool.ls$fast_to_struc,    -Params_FivePool.ls$slow_to_struc,   -Params_FivePool.ls$passive_to_struc,
+    -Params_FivePool.ls$meta_to_fast,    -Params_FivePool.ls$struc_to_fast,    1,                       -Params_FivePool.ls$slow_to_fast,    -Params_FivePool.ls$passive_to_fast,
+    -Params_FivePool.ls$meta_to_slow,    -Params_FivePool.ls$struc_to_slow,    -Params_FivePool.ls$fast_to_slow,     1,                      -Params_FivePool.ls$passive_to_slow,
+    -Params_FivePool.ls$meta_to_passive, -Params_FivePool.ls$struc_to_passive, -Params_FivePool.ls$fast_to_passive,  -Params_FivePool.ls$slow_to_passive,  1
+  ),
+  nrow = 5,
+  byrow=TRUE)
+
+
+```
