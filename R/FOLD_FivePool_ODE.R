@@ -1,19 +1,25 @@
 #' Five-Pool First Order Soil Carbon Model with Linear Decay
 #'
-#' @param t A sequence of time values, at whatever resolution desired. This model is designed to run in a yearly timestep.
+#' @param t 
+#' A sequence of time values, at whatever resolution desired. This model is designed to run in a yearly timestep.
 #' 
-#' @param y A vector containing six named elements, CO2, 2 litter pools (Lit_metabolic, Lit_structural) and 3 soil pools (Soil_fast, Soil_slow, Soil_passive), in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cumulative CO2 released.
+#' @param y 
+#' A vector containing six named elements, CO2, 2 litter pools (Lit_metabolic, Lit_structural) and 3 soil pools (Soil_fast, Soil_slow, Soil_passive), in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cumulative CO2 released.
 #' 
-#' @param parms Consists of a list containing 'inputs', 'input_to_struc', 'input_to_meta', 'input_to_fast', 'input_to_slow', 'input_to_passive', 'turnoverTime_meta', 'turnoverTime_fast', 'turnoverTime_struc', 'turnoverTime_slow', 'turnoverTime_passive','struc_to_fast', 'struc_to_slow', 'meta_to_fast', 'fast_to_slow', 'meta_to_struc', 'meta_to_slow', 'meta_to_passive', 'struc_to_meta', 'struc_to_passive', 'fast_to_meta', 'slow_to_meta', 'passive_to_meta', 'fast_to_struc', 'slow_to_struc', 'passive_to_struc', 'fast_to_slow', 'fast_to_passive', 'slow_to_fast', 'slow_to_passive', 'passive_to_fast', and'passive_to_slow'. 
+#' @param parms 
+#' Consists of a list containing 'inputs', 'input_to_struc', 'input_to_meta', 'input_to_fast', 'input_to_slow', 'input_to_passive', 'turnoverTime_meta', 'turnoverTime_fast', 'turnoverTime_struc', 'turnoverTime_slow', 'turnoverTime_passive','struc_to_fast', 'struc_to_slow', 'meta_to_fast', 'fast_to_slow', 'meta_to_struc', 'meta_to_slow', 'meta_to_passive', 'struc_to_meta', 'struc_to_passive', 'fast_to_meta', 'slow_to_meta', 'passive_to_meta', 'fast_to_struc', 'slow_to_struc', 'passive_to_struc', 'fast_to_slow', 'fast_to_passive', 'slow_to_fast', 'slow_to_passive', 'passive_to_fast', and'passive_to_slow'. 
 #' 'inputs' can be either a number for static carbon inputs or a vector representing inputs (mass concentration in kg per m$^2$) over time (years).
 #' All 'turnoverTime_pool' are expressed in years.
 #' All 'inputs_to_pool' and all 'pool_to_pool' are unitless fractions representing either allocation or a portion of decomposition flow, respectively.
 #' 
-#' @param rel_tol default relative tolerance is set to 1e-8
+#' @param rel_tol 
+#' default relative tolerance is set to 1e-8
 #'
-#' @return Returns cumulative CO2 release and the current value of the litter and soil C pools.
+#' @return 
+#' Returns cumulative CO2 release and the current value of the litter and soil C pools.
 #' 
-#' @examples (none yet)
+#' @examples 
+#' (none yet)
 #' 
 #' 
 FivePool_ODE.fn <- function(t, #vector of times
@@ -68,9 +74,9 @@ FivePool_ODE.fn <- function(t, #vector of times
   
   ###ODE###
   
-  ans <- u * allocation_vector - decay_matrix %*% transfer_matrix %*% pools
+  ans <- u * allocation_vector - transfer_matrix %*% decay_matrix %*% pools
   
-  resp <- decay_matrix %*% transfer_matrix %*% pools
+  resp <- transfer_matrix %*% decay_matrix %*% pools
   total_resp <- sum(resp)
   
   #if we're not doing a zero-input run...

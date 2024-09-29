@@ -7,15 +7,20 @@
 #' where $u(t)$ represents carbon inputs (which can change over time due to seasonal values, regime shifts, experiments, etc.), and the decay rate $k$ represents the inverse of turnover time $\frac{1}{\tau}$ (turnover time being the average time carbon is expected to remain in the soil before cycling out).
 #' 
 #' 
-#' @param t A sequence of time values, at whatever resolution desired. This model is designed to run in a yearly timestep.
+#' @param t 
+#' A sequence of time values, at whatever resolution desired. This model is designed to run in a yearly timestep.
 #' 
-#' @param y A vector containing two named elements, CO2 and soil, in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cumulative CO2 released.
+#' @param y 
+#' A vector containing two named elements, CO2 and soil, in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cumulative CO2 released.
 #' 
-#' @param parms Consists of a list containing 'inputs' and 'turnoverTime', where turnoverTime is in months and inputs can be either a number for static carbon inputs or a vector representing inputs over time.
+#' @param parms 
+#' Consists of a list containing 'inputs' and 'turnoverTime', where turnoverTime is in months and inputs can be either a number for static carbon inputs or a vector representing inputs over time.
 #' 
-#' @param rel_tol default relative tolerance is set to 1e-8
+#' @param rel_tol 
+#' default relative tolerance is set to 1e-8
 #'
-#' @return Returns cumulative CO2 release and the current value of the C pool.
+#' @return 
+#' Returns cummulative CO2 release and the current value of the C pool.
 #' 
 #' @examples (none yet)
 #' 
