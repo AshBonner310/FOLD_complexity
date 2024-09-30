@@ -68,31 +68,32 @@ As inputs are driven by dynamics outside of our soil system, they can change ove
 
 ```{r OnePoolSetup}
 #sources in the ODE model
-source("R/FOLD_OnePool_ODE.R")
+source("R/OnePool_ODE.R")
 
-#creates the inputs function we will be using, so we can graph the inputs against the model simulations.
-incubation_function <- function(time, parms){
+#creates a constant function for spin up simulations, so we can graph the inputs against the model simulations.
+constant.fn <- function(time, parms){
+  return(parms$ave_inputs)
+}
+
+
+incubation.fn <- function(time, parms){
   return(0)
 }
 
-constant_function <- function(time, parms){
-  return(parms$const_inputs)
-}
-
-seasonal_function <- function(time, parms){
+seasonal.fn <- function(time, parms){
   inputs <- (5/300)*sin((pi/6)*time+(3*pi/2))+(5/300) 
   return(inputs)
 }
 
 #params
-Params_OnePool.ls <- list(const_inputs = 260, #g-C m-2 yr-1
+Params_OnePool.ls <- list(ave_inputs = 260, #g-C m-2 yr-1
                                 #u; [0, 2.5] kg-carbon m-2 yr-1
                           turnoverTime = 20
                                 #\tau; [10, 50] yr
                           
 )
 
-Params_OnePool.ls$inputs.fn <- constant_function
+Params_OnePool.ls$inputs.fn <- constant.fn
 
 SimTimes <- seq(0, 100, by = 1/12) #one hundred years, monthly
 
@@ -111,12 +112,9 @@ This is easily calculated and verified on a simulation run forward in time, wher
 
 ```{r SteadyState}
 
-SS_OnePool.fn <- function(parms){
-    ans <- parms$const_inputs * parms$turnoverTime
-  return(c(Cumulative_Respiration = 0, Soil_Carbon_Concentration = ans))
-}
+source("R/OnePool_SS.R")
 
-Sim1_SS.df <- lsoda(y = SS_OnePool.fn(parms = Params_OnePool.ls),
+Sim1_SS.df <- lsoda(y = OnePool_SS.fn(parms = Params_OnePool.ls),
                 times = SimTimes,
                 func = OnePool_ODE.fn,
                 parms = Params_OnePool.ls) %>%
@@ -277,7 +275,7 @@ CENTURY as debuted in 1983 included the effects of temperature and moisture on d
 
 ```{r Parameters}
 
-source("R/FOLD_FivePool_ODE.R")
+source("R/FivePool_ODE.R")
 
 Params_FivePool.ls <- list(
                   ##Input-based parameters (such as allocation)

@@ -1,0 +1,93 @@
+---
+title: "Aggregate Decay Rate"
+author: "Ashley Bonner"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# An Aggregate Decay Rate
+
+## Introduction
+
+Through some mathematical theory, we can actually show that the product of the transfer and decay matrix ($\boldsymbol{KA}$) is an invertible matrix. 
+This means that the equation can be solved for steady state, and the form this takes is:
+$$ \vec{C}(t) = u \left(\boldsymbol{KA}\right)^{-1} \vec{b} $$
+And if we sum up the pools, this actually gives us a single value for the steady state of total soil carbon in the model.
+$$ \boldsymbol{C} = u \sum \left( \left( \boldsymbol{KA}\right)^{-1} \vec{b} \right) $$
+Recall from the one pool model that the steady state was the carbon inputs ($u$) times the decay rate - allowing us to ask the question: can we consider $\sum \left( \left( \boldsymbol{KA}\right)^{-1} \vec{b} \right)$ to be a proxy decay rate for a more complicated first-oder linear decay model, thus allowing us to use a simpler one-pool model implimentation instead?
+
+We start by calculating what this aggregrate decay rate would be for the Century parameters. 
+One of the cool bits about this method is that the size of the vector and matrix values do not matter - as long as you ensure that the decay rates on the matrix are in descening order (longer turnover times last).
+This reduced complexity one pool model can be used in place of a first-order linear decay model with any number of pools.
+
+```{r ProxyRate}
+#Pull in the aggregate decay rate function
+source("R/AggregateDecayRate.R")
+
+#Create a Parameter list for the One-pool model using the decay rate and the same inputs
+Params_Aggregate.ls <- list(ave_inputs = 260, #g-C m-2 yr-1, according to CENTURY model validation
+                            turnoverTime = Proxy_decayrate.fn(parms = Params_FivePool.ls)
+                            )
+
+#Define a Constant Function for initial test runs
+constant.fn <- function(time, parms){
+  return(parms$ave_inputs)
+}
+
+#Add needed input function
+Params_Aggregate.ls$inputs.fn <- constant.fn
+
+#Simulation times for a spin up example of the aggrgate
+SimTimes <- seq(0,300, by=1)
+
+#Simulation for a spin-up simulation with the one-pool model
+SpinUp_Proxy_sim.df <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                    "Soil_Carbon_Concentration" = 0),
+                                    times = SimTimes,
+                                    func = OnePool_ODE.fn,
+                                    parms = Params_Aggregate.ls) %>%
+                          as.data.frame() %>%
+                  mutate(RespirationRate = OnePool_ODE.fn(t = NA, 
+                                                          y = c(NA, Soil_Carbon_Concentration),
+                                                          parms = Params_Aggregate.ls)[[1]]['Cumulative_Respiration'],
+                          .by = everything()
+                  )
+
+
+ggplot(SpinUp_Proxy_sim.df) + 
+  geom_line(aes(x=time, y=Soil_Carbon_Concentration)) +
+  #This additional lsoda run verifies that the steady state found for the Five pool model remains the steady state under our aggregate decay rate
+  geom_line(data = lsoda(y = c(Cumulative_Respiration=0, 
+                                Soil_Carbon_Concentration = sum(FivePool_SS.fn(parms=Params_FivePool.ls))),
+                          times = SimTimes,
+                          func = OnePool_ODE.fn,
+                          parms = Params_Aggregate.ls) %>%
+                            as.data.frame() , 
+            aes(x=time, y=Soil_Carbon_Concentration), linetype="dotted") 
+
+ggplot(SpinUp_Proxy_sim.df) + 
+  geom_line(aes(x=time, y=RespirationRate)) +
+  geom_line(data = lsoda(y = c(Cumulative_Respiration=0,
+                                Soil_Carbon_Concentration = sum(FivePool_SS.fn(parms=Params_FivePool.ls))),
+                          times = SimTimes,
+                          func = OnePool_ODE.fn,
+                          parms = Params_Aggregate.ls) %>%
+                            as.data.frame() %>%
+                            mutate(RespirationRate = OnePool_ODE.fn(t = NA, 
+                                                          y = c(NA, Soil_Carbon_Concentration),
+                                                          parms = Params_Aggregate.ls)[[1]]['Cumulative_Respiration'],
+                                  .by = everything()
+                                ),
+            aes(x=time, y=RespirationRate), linetype="dotted")
+
+```
+
+# How does it compare?
+
+Does a single pool model structure with first order linear decay actually stand up against a more robust multi-pool structure?
+In the Scenario Markdowns, we test this aggregate decay rate for a one pool model against a five pool Century model and compare the outputs.
+

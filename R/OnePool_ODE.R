@@ -14,13 +14,15 @@
 #' A vector containing two named elements, CO2 and soil, in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cumulative CO2 released.
 #' 
 #' @param parms 
-#' Consists of a list containing 'inputs' and 'turnoverTime', where turnoverTime is in months and inputs can be either a number for static carbon inputs or a vector representing inputs over time.
+#' Consists of a list containing 'ave_inputs' and 'turnoverTime', where turnoverTime is in months and inputs can be either a number for static carbon inputs or a vector representing inputs over time.
+#' This list should also contain a function called 'inputs.fn', which takes the arguments "time" and "parms".
+#' Finally, any parms required for inputs.fn should also be included.
 #' 
 #' @param rel_tol 
 #' default relative tolerance is set to 1e-8
 #'
 #' @return 
-#' Returns cummulative CO2 release and the current value of the C pool.
+#' Returns cumulative CO2 release and the current value of the C pool.
 #' 
 #' @examples (none yet)
 #' 
@@ -36,16 +38,7 @@ OnePool_ODE.fn <- function(t,
   if(! all(c('turnoverTime', 'inputs.fn') %in% names(parms))){
     stop('You have a parameter missing that this function needs.')
   }
-  
-  # if(typeof(parms$inputs) == 'list'){
-  #   
-  #   u <- Scenario_Inputs.df[t, "Carbon"]
-  #   
-  # }else{
-  #   
-  #   u <- parms$inputs
-  #   
-  # }
+
   
   u <- parms$inputs.fn(time=t, parms=parms)
   
@@ -65,5 +58,6 @@ OnePool_ODE.fn <- function(t,
       stop('Conservation of mass does not hold')
     }
   }
-  return(list(c(Cumulative_Respiration = dCO2, C_total = dSoil)))
+  return(list(c(Cumulative_Respiration = dCO2, 
+                Soil_Carbon_Concentration = dSoil)))
 }
