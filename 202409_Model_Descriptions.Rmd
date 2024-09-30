@@ -195,7 +195,7 @@ This is overwhelming the model structure of choice, albiet for different numbers
 
 ```{r Diagram, echo = FALSE}
 grViz("
-  digraph Three_Pool_Model {
+  digraph Five_Pool_Model {
     rankdir=LR
     
     subgraph outside_the_system{ 
@@ -284,36 +284,36 @@ Params_FivePool.ls <- list(
                   inputs = 260,
                         #CENUTRY model uses 260 grams C per m^2 per year
                         #u; kg-carbon m-2 yr-1, 
-                    input_to_struc = 1/9,  
-                    input_to_meta = 8/9,  
+                    input_to_struc = 2/9,  
+                    input_to_meta = 7/9,  
                         #C goes through litter pools first
                     input_to_fast = 0,  
                     input_to_slow = 0,  
                     input_to_passive = 0,  
                             
                   ##turnover times (years)
-                     turnoverTime_meta = 1,  #adjusted out of initial range to match CENTURY model validation for total plant residue
-                        # CENTURY: .1 to 1 year
-                     turnoverTime_struc = 5, #adjusted out of initial range to match CENTURY model validation for total plant residue
+                     turnoverTime_meta = 3.5,  #this is CENTURY 1987, CENTURY 1983 has .1 to 1 year
+                     turnoverTime_struc = 9.5, #adjusted out of initial range to match CENTURY model validation for total plant residue
                         # CENTURY: 1 to 5 years
-                     turnoverTime_fast = 6,  #CENTURY initially had 10 years
-                     turnoverTime_slow = 40, #CENTURY has 50, we have adjusted to reach appropriate ratios as Parton did
-                     turnoverTime_passive = 1500, #CENTURY has 1500, adjusted to reach appropriate ratios (as Parton did)
+                     turnoverTime_fast = 10, #this is CENTURY 1987, CENTURY 1983 has 10 years
+                     turnoverTime_slow = 50, #adjusted, CENTURY 1987 has ~263, CENTURY 1983 has 50
+                     turnoverTime_passive = 2500, #adjusted, CENTURY 1987 has ~7690, CENTURY 1983 has 1500 years
                      
                   ##Transfer Matrix values 
-                       struc_to_fast = .8*.25, 
-                       struc_to_slow = .2*.25, 
+                       struc_to_fast = .7*.35, 
+                       struc_to_slow = .3*.35, 
                           #60% lost to respiration, the remaining 40% is called Net Microbial Production 
                           #Adjusted to 75% lost to respiration to reach model validations percentages
-                       meta_to_fast = .25,  
+                       meta_to_fast = .35,  
                           #60% lost to respiration, rest to active
                           #Adjusted to 75% lost to respiration to reach model validations percentages
-                       fast_to_slow = .3,      
+                       fast_to_slow = .4,      
                           #60% lost to respiration, rest to slow
-                       slow_to_fast = 0.9*.3,        
-                       slow_to_passive = .1*.3,     
+                       slow_to_fast = 0.92*.4,        
+                       slow_to_passive = .08*.4,     
                           #60% lost to respiration, rest split between active and passive
-                       passive_to_fast = .25,
+                       passive_to_fast = .4,
+                    #.4,
                           #60% lost to respiration, rest to slow
                     
                       #all the zero-flows
@@ -331,12 +331,14 @@ Params_FivePool.ls <- list(
                         passive_to_slow = 0,
                         passive_to_struc = 0
                        )
+
+
 ```
 
 ##Example: Spin up simulation
 
 ```{r Simulation}
-SimTimes <- seq(0, 5000, by = 1) 
+SimTimes <- seq(0, 8000, by = 1) 
 
 Sim5.df <- lsoda(y = c(Cumulative_Respiration=0, 
                        Metabolic_Plant_Residue= 0,
@@ -352,8 +354,8 @@ Sim5.df <- lsoda(y = c(Cumulative_Respiration=0,
                            Fast_Soil + Slow_Soil + Passive_Soil) %>%
                   mutate(Respiration_Rate = FivePool_ODE.fn(t = time, 
                                                             y = c(NA, 
-                                                                  Metabolic_Plant_Residue, Structural_Plant_Residue, 
-                                                                  Fast_Soil, Slow_Soil, Passive_Soil),
+                                                                  Metabolic_Plant_Residue, Fast_Soil, Structural_Plant_Residue, 
+                                                                  Slow_Soil, Passive_Soil),
                                                             parms = Params_FivePool.ls
                                                             )[[1]]['Cumulative_Respiration'],
                           .by = everything())
@@ -391,7 +393,7 @@ ggplot(Sim5.df %>%
          pivot_longer(cols = Fast_Soil:Plant_Residue,
                                   names_to = 'Pool',
                                   values_to = 'Mass')) +
-  geom_line(aes(x=time, y=Mass, linetype = Pool)) 
+  geom_line(aes(x=time, y=Mass, linetype = Pool, color = Pool)) 
 
 
 ```
@@ -401,18 +403,19 @@ ggplot(Sim5.df %>%
 source("R/FivePool_SS.R")
 
 #Verification of Steady State:
-FivePool_SteadyState <- FivePool_SS.fn(parms=Params_FivePool.ls)
-FivePool_SteadyStates <- c("Plant_Residue" =  FivePool_SteadyState['Metabolic_Plant_Residue']+FivePool_SteadyState['Structural_Plant_Residue'] )
-FivePool_SteadyStates['Fast_Soil'] <- FivePool_SteadyState['Fast_Soil']
-FivePool_SteadyStates['Slow_Soil'] <- FivePool_SteadyState['Slow_Soil']
-FivePool_SteadyStates['Passive_Soil'] <- FivePool_SteadyState['Passive_Soil']
-names(FivePool_SteadyStates) <- c("PlantResidue", "Fast", "Slow", "Passive")
-FivePool_SteadyStates['Total_SOC'] <- sum(FivePool_SteadyStates)
-FivePool_SS_Percentages <- 100*(FivePool_SteadyStates/FivePool_SteadyStates['Total_SOC'])
-FivePool_SteadyStates
+FivePool_SteadyState <- as.data.frame(t(FivePool_SS.fn(parms=Params_FivePool.ls))) %>%
+  mutate(Total_SOC = sum(FivePool_SS.fn(parms=Params_FivePool.ls)))
+
+FivePool_SteadyState <- FivePool_SteadyState %>%
+  mutate(Total_PR = Metabolic_Plant_Residue + Structural_Plant_Residue) %>%
+  pivot_longer(cols = c(names(FivePool_SteadyState), "Total_PR"),
+               names_to = "Pool",
+               values_to = "gC_per_m2") %>%
+  mutate(Percentages = 100*gC_per_m2/sum(FivePool_SS.fn(parms=Params_FivePool.ls))) 
 
 
-FivePool_SS_Percentages
-
+FivePool_SteadyState
 #Goal: Simulated: PR 16, Active 11, Slow 29, Passive 44
 ```
+
+
