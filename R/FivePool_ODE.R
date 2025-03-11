@@ -7,10 +7,11 @@
 #' A vector containing six named elements, CO2, 2 litter pools (Lit_metabolic, Lit_structural) and 3 soil pools (Soil_fast, Soil_slow, Soil_passive), in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cumulative CO2 released.
 #' 
 #' @param parms 
-#' Consists of a list containing 'inputs', 'input_to_struc', 'input_to_meta', 'input_to_fast', 'input_to_slow', 'input_to_passive', 'turnoverTime_meta', 'turnoverTime_fast', 'turnoverTime_struc', 'turnoverTime_slow', 'turnoverTime_passive','struc_to_fast', 'struc_to_slow', 'meta_to_fast', 'fast_to_slow', 'meta_to_struc', 'meta_to_slow', 'meta_to_passive', 'struc_to_meta', 'struc_to_passive', 'fast_to_meta', 'slow_to_meta', 'passive_to_meta', 'fast_to_struc', 'slow_to_struc', 'passive_to_struc', 'fast_to_slow', 'fast_to_passive', 'slow_to_fast', 'slow_to_passive', 'passive_to_fast', and'passive_to_slow'. 
+#' Consists of a list containing 'ave_inputs', 'input_to_struc', 'input_to_meta', 'input_to_fast', 'input_to_slow', 'input_to_passive', 'turnoverTime_meta', 'turnoverTime_fast', 'turnoverTime_struc', 'turnoverTime_slow', 'turnoverTime_passive','struc_to_fast', 'struc_to_slow', 'meta_to_fast', 'fast_to_slow', 'meta_to_struc', 'meta_to_slow', 'meta_to_passive', 'struc_to_meta', 'struc_to_passive', 'fast_to_meta', 'slow_to_meta', 'passive_to_meta', 'fast_to_struc', 'slow_to_struc', 'passive_to_struc', 'fast_to_slow', 'fast_to_passive', 'slow_to_fast', 'slow_to_passive', 'passive_to_fast', and'passive_to_slow', 'inputs.fn'. 
 #' 'inputs' can be either a number for static carbon inputs or a vector representing inputs (mass concentration in kg per m$^2$) over time (years).
 #' All 'turnoverTime_pool' are expressed in years.
 #' All 'inputs_to_pool' and all 'pool_to_pool' are unitless fractions representing either allocation or a portion of decomposition flow, respectively.
+#' Finally, any parms required for inputs.fn should also be included.
 #' 
 #' @param rel_tol 
 #' default relative tolerance is set to 1e-8
@@ -25,7 +26,7 @@
 FivePool_ODE.fn <- function(t, #vector of times
                              y, #6-valued vector in the order of Cummulative Respiration, then pools in ascending order based on turnover time (descending based on decay rate - faster-decaying pools first, so Litter-Metabolic, Litter-Structural, Soil-Fast, Soil-Slow, Soil-Passive)
                              parms, #Parameter list conatining input_type, inputs (monthly average), all allocation of inputs into pools, and all transfer rates between the pools.
-                             rel_tol=1e-8 #our default relative tolerance
+                             rel_tol = 1e-10 #our default relative tolerance
 ){ 
   
   pools <- matrix(y[2:6], nrow=5)
@@ -57,20 +58,11 @@ FivePool_ODE.fn <- function(t, #vector of times
   byrow=TRUE)
   
   
-  if(! all(c('inputs', 'input_to_struc', 'input_to_meta', 'input_to_fast', 'input_to_slow', 'input_to_passive', 'turnoverTime_meta', 'turnoverTime_fast', 'turnoverTime_struc', 'turnoverTime_slow', 'turnoverTime_passive','struc_to_fast', 'struc_to_slow', 'meta_to_fast', 'fast_to_slow', 'meta_to_struc', 'meta_to_slow', 'meta_to_passive', 'struc_to_meta', 'struc_to_passive', 'fast_to_meta', 'slow_to_meta', 'passive_to_meta', 'fast_to_struc', 'slow_to_struc', 'passive_to_struc', 'fast_to_slow', 'fast_to_passive', 'slow_to_fast', 'slow_to_passive', 'passive_to_fast', 'passive_to_slow' ) %in% names(parms))){
+  if(! all(c('ave_inputs', 'inputs.fn',  'input_to_struc', 'input_to_meta', 'input_to_fast', 'input_to_slow', 'input_to_passive', 'turnoverTime_meta', 'turnoverTime_fast', 'turnoverTime_struc', 'turnoverTime_slow', 'turnoverTime_passive','struc_to_fast', 'struc_to_slow', 'meta_to_fast', 'fast_to_slow', 'meta_to_struc', 'meta_to_slow', 'meta_to_passive', 'struc_to_meta', 'struc_to_passive', 'fast_to_meta', 'slow_to_meta', 'passive_to_meta', 'fast_to_struc', 'slow_to_struc', 'passive_to_struc', 'fast_to_slow', 'fast_to_passive', 'slow_to_fast', 'slow_to_passive', 'passive_to_fast', 'passive_to_slow' ) %in% names(parms))){
     stop('You have a parameter missing that this function needs.')
   }
   
-  ###INPUT SCENARIOS##
-  if(typeof(parms$inputs) == 'list'){
-    
-    u <- Scenario_Inputs.df[t, "Carbon"]
-    
-  }else{
-    
-    u <- parms$inputs
-    
-  }
+  u <- parms$inputs.fn(time=t, parms=parms)
   
   ###ODE###
   
@@ -80,14 +72,14 @@ FivePool_ODE.fn <- function(t, #vector of times
   total_resp <- sum(resp)
   
   #if we're not doing a zero-input run...
-  if(u != 0){ 
+  if(u != 0){
     #check against a relative tolerance to ensure conservation of mass
-    if(abs(u - (total_resp + sum(ans)))/u > rel_tol){ 
+    if(abs(u - (total_resp + sum(ans)))/u > rel_tol){
       #relative tolerance allowance
       stop('Conservation of mass does not hold')
     }
   }
-  
+
   return(list(c(
     Cumulative_Respiration = total_resp,
     Lit_metabolic = ans[1],

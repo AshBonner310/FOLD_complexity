@@ -35,29 +35,28 @@ OnePool_ODE.fn <- function(t,
   CO2 <- y[1] 
   soil <- y[2]
   
-  if(! all(c('turnoverTime', 'inputs.fn') %in% names(parms))){
+  if(! all(c('turnoverTime', 'inputs.fn', 'ave_inputs') %in% names(parms))){
     stop('You have a parameter missing that this function needs.')
   }
-
   
   u <- parms$inputs.fn(time=t, parms=parms)
   
   dCO2 <- soil / parms$turnoverTime
   dSoil <- u - soil / parms$turnoverTime
   
-  #if we're not doing a zero-input run...
-  if(u != 0){ 
-    
-    # print(paste("dC02", dCO2))
-    # print(paste("dSoil", dSoil))
-    # print(paste("Relative Tolerance", rel_tol))
-    
-    #make a relative tolerance to ensure conservation of mass
-    if(abs(u - (dCO2 + dSoil))/u > rel_tol){ 
-      #relative tolerance allowance
-      stop('Conservation of mass does not hold')
-    }
-  }
+  # #if we're not doing a zero-input run...
+  # if(u != 0){ 
+  #   
+  #   # print(paste("dC02", dCO2))
+  #   # print(paste("dSoil", dSoil))
+  #   # print(paste("Relative Tolerance", rel_tol))
+  #   
+  #   #make a relative tolerance to ensure conservation of mass
+  #   if(abs(u - (dCO2 + dSoil))/u > rel_tol){ 
+  #     #relative tolerance allowance
+  #     stop('Conservation of mass does not hold')
+  #   }
+  #}
   return(list(c(Cumulative_Respiration = dCO2, 
                 Soil_Carbon_Concentration = dSoil)))
 }

@@ -42,7 +42,7 @@ FivePool_SS.fn <- function(parms){
   nrow = 5,
   byrow=TRUE)
   
-  ans <- solve(transfer_matrix %*% decay_matrix, parms$inputs * allocation_vector)
+  ans <- solve(transfer_matrix %*% decay_matrix, parms$ave_inputs * allocation_vector)
   
   return(c(Metabolic_Plant_Residue = ans[1],
            Structural_Plant_Residue = ans[2],

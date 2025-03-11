@@ -1,0 +1,321 @@
+---
+title: "Incubation Scenario"
+author: "Ashley Bonner"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse) #data library
+library(deSolve) #ODE solver
+library(patchwork) #figure arrangement
+library(dplyr) #data wrangling
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Scenario Goals
+We are looking to compare a one-pool model with a single decay rate against a mulit-pool model with transfer of soil carbon between pools in simulated real-world scenarios.
+This Markdown is going to test our method in a simulated Incubation study scenario.
+
+First, setting up our models for testing.
+
+```{r setup}
+#functions
+source("R/AggregateDecayRate.R")
+source("R/OnePool_ODE.R")
+source("R/FivePool_ODE.R")
+source("R/FivePool_SS.R")
+
+#parameters
+##five pool
+# Params_FivePool.ls <- list(
+#                   ##Input-based parameters (such as allocation)
+#                   ave_inputs = 260,
+#                         #CENUTRY model uses 260 grams C per m^2 per year
+#                         #u; kg-carbon m-2 yr-1, 
+#                     input_to_struc = 2/9,  
+#                     input_to_meta = 7/9,  
+#                         #C goes through litter pools first
+#                     input_to_fast = 0,  
+#                     input_to_slow = 0,  
+#                     input_to_passive = 0,  
+#                             
+#                   ##turnover times (years)
+#                      turnoverTime_meta = 3.5,  #this is CENTURY 1987, CENTURY 1983 has .1 to 1 year
+#                      turnoverTime_struc = 9.5, #adjusted out of initial range to match CENTURY model validation for total plant residue
+#                         # CENTURY: 1 to 5 years
+#                      turnoverTime_fast = 10, #this is CENTURY 1987, CENTURY 1983 has 10 years
+#                      turnoverTime_slow = 50, #adjusted, CENTURY 1987 has ~263, CENTURY 1983 has 50
+#                      turnoverTime_passive = 2500, #adjusted, CENTURY 1987 has ~7690, CENTURY 1983 has 1500 years
+#                      
+#                   ##Transfer Matrix values 
+#                        struc_to_fast = .7*.35, 
+#                        struc_to_slow = .3*.35, 
+#                           #60% lost to respiration, the remaining 40% is called Net Microbial Production 
+#                           #Adjusted to 75% lost to respiration to reach model validations percentages
+#                        meta_to_fast = .35,  
+#                           #60% lost to respiration, rest to active
+#                           #Adjusted to 75% lost to respiration to reach model validations percentages
+#                        fast_to_slow = .4,      
+#                           #60% lost to respiration, rest to slow
+#                        slow_to_fast = 0.92*.4,        
+#                        slow_to_passive = .08*.4,     
+#                           #60% lost to respiration, rest split between active and passive
+#                        passive_to_fast = .4,
+#                     #.4,
+#                           #60% lost to respiration, rest to slow
+#                     
+#                       #all the zero-flows
+#                         meta_to_struc = 0,
+#                         meta_to_slow = 0,
+#                         meta_to_passive = 0,
+#                         struc_to_meta = 0,
+#                         struc_to_passive = 0,
+#                         fast_to_passive = 0,
+#                         fast_to_meta = 0,
+#                         slow_to_meta = 0,
+#                         passive_to_meta = 0,
+#                         fast_to_struc = 0,
+#                         slow_to_struc = 0,     
+#                         passive_to_slow = 0,
+#                         passive_to_struc = 0
+#                        )
+
+
+Params_FivePool.df <- read_csv(file.path("Data/FivePoolModel_Parameters.csv"), show_col_types = FALSE)
+Params_FivePool.ls <- list()
+
+for(i in 1:ncol(Params_FivePool.df)) {
+  Params_FivePool.ls[[i]] <- as.numeric(Params_FivePool.df[,i])
+}
+
+names(Params_FivePool.ls) <- colnames(Params_FivePool.df)
+
+
+##create the One-pool parameters with aggregate decay rate.
+#Pull in the Aggregate Decay rate function
+#Pull in the aggregate decay rate function
+source("R/AggregateDecayRate.R")
+
+Params_Aggregate.ls <- list(ave_inputs = 260, #g-C m-2 yr-1, according to CENTURY model validation
+                            turnoverTime = Proxy_decayrate.fn(parms = Params_FivePool.ls)
+                            )
+
+```
+
+# Incubation Studies
+
+Soils are removed from their environments and receive no additional carbon inputs while CO2 rates are measured.
+Fitting these data curves created the motivation for these multi-pool models, where different forms of carbon in soil decayed at different rates.
+We do not expect the one-pool model to capture the same dynamics as a multi-pool model in a simulated scenario like this.
+As Incubation studies often run throughout the life of a grad student, we will run this model over five years, with a monthly resolution.
+
+```{r InputsForIncub}
+##define a no-inputs function 
+incubation.fn <- function(time, parms){
+  return(0)
+}
+
+#Simulation Times vector
+SimTimes <- seq(0, 20, by = 1/12)
+
+Inputs_sim <- as.data.frame(SimTimes)%>%
+  mutate(inputs = incubation.fn(time = SimTimes, parms = Params_OnePool.ls))
+
+ggplot(Inputs_sim) + 
+  geom_line(aes(x = SimTimes/12, y=inputs)) + 
+  labs(title = "Inputs over Simulation", x = "Time (years)", y = "Soil Carbon Inputs (gC per m2 per year)")
+```
+
+
+```{r Simulations}
+##add needed input function to parameter lists
+Params_Aggregate.ls$inputs.fn <- incubation.fn
+Params_FivePool.ls$inputs.fn <- incubation.fn
+
+Incubation_Sim1.df <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  "Soil_Carbon_Concentration" = sum(FivePool_SS.fn(parms = Params_FivePool.ls))),
+                times = SimTimes,
+                func = OnePool_ODE.fn,
+                parms = Params_Aggregate.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Respiration_Rate = OnePool_ODE.fn(t = NA, 
+                                           y = c(NA, Soil_Carbon_Concentration),
+                                           parms = Params_Aggregate.ls
+                            )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )%>%
+  mutate(Input_Rate = Params_Aggregate.ls$inputs.fn(t = time,
+                                                  parms = Params_Aggregate.ls),
+         .by = everything()
+  )
+
+ggplot(Incubation_Sim1.df %>% pivot_longer(cols = Soil_Carbon_Concentration:Input_Rate,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Incubation Simulation: One Pool", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
+
+
+
+Incubation_Sim5.df <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  FivePool_SS.fn(parms = Params_FivePool.ls)),
+                times = SimTimes,
+                func = FivePool_ODE.fn,
+                parms = Params_FivePool.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Soil_Carbon_Concentration = Metabolic_Plant_Residue + Structural_Plant_Residue + Fast_Soil + Slow_Soil + Passive_Soil) %>%
+  mutate(Respiration_Rate = FivePool_ODE.fn(t = NA, 
+                                           y = c("Cumulative_Respiration" = 0, 
+                                                Metabolic_Plant_Residue = Metabolic_Plant_Residue,
+                                                Structural_Plant_Residue = Structural_Plant_Residue,
+                                                Fast_Soil = Fast_Soil,
+                                                Slow_Soil = Slow_Soil,
+                                                Passive_Soil = Passive_Soil),
+                                            parms = Params_FivePool.ls
+                                  )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )%>%
+  mutate(Input_Rate = Params_FivePool.ls$inputs.fn(t = time,
+                                                  parms = Params_FivePool.ls),
+         .by = everything()
+  )
+
+ggplot(Incubation_Sim5.df %>% pivot_longer(cols = Metabolic_Plant_Residue:Input_Rate,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Incubation Simulation:Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "SOC (gC per m2) or Rate  (gC per m2 per year)")
+
+
+ggplot(Incubation_Sim5.df %>%
+         mutate(Plant_Residue = Metabolic_Plant_Residue + Structural_Plant_Residue) %>%
+         select(!c('Respiration_Rate', 'Metabolic_Plant_Residue', 'Structural_Plant_Residue')) %>%
+         pivot_longer(cols = Fast_Soil:Plant_Residue,
+                                  names_to = 'Pool',
+                                  values_to = 'Mass')) +
+  geom_line(aes(x=time, y=Mass, linetype = Pool, color = Pool)) + 
+  labs(title = "Incubation Simulation: Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
+
+
+```
+
+
+# Model to Model Comparisons
+
+```{r}
+Incubation_Sim_comp.df <- rbind(Incubation_Sim1.df %>% 
+            pivot_longer(cols = c("Respiration_Rate", "Input_Rate"),
+                         names_to = "Rate_Type",
+                         values_to = "Rate") %>%
+            mutate(Model = case_when(Rate_Type == "Input_Rate" ~ "Input",
+                                     Rate_Type == "Respiration_Rate" ~ "OnePool")),
+           Incubation_Sim5.df %>%
+            pivot_longer(cols = c("Respiration_Rate", "Input_Rate"),
+                         names_to = "Rate_Type",
+                         values_to = "Rate") %>%
+            mutate(Model = case_when(Rate_Type == "Input_Rate" ~ "Input",
+                                     Rate_Type == "Respiration_Rate" ~ "FivePool")) %>% 
+            select(c("time","Soil_Carbon_Concentration","Rate_Type","Rate","Model"))
+           )
+           
+
+ggplot(Incubation_Sim_comp.df) +
+  geom_line(aes(x=time, y=Soil_Carbon_Concentration, color=Model), linetype='dotted') +
+  geom_line(data= Incubation_Sim_comp.df %>% filter(time <= 5),
+            aes(x=time, y=Soil_Carbon_Concentration, color=Model)) + 
+  labs(title = "Incubation Simulation", subtitle = "Carbon Stocks", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
+
+ggplot(Incubation_Sim_comp.df) +
+  geom_line(aes(x=time, y=Rate, color=Model), linetype='dotted') +
+  geom_line(data= Incubation_Sim_comp.df %>% filter(time <= 5),
+            aes(x=time, y=Rate, color=Model)) + 
+  labs(title = "Incubation Simulation", subtitle = "Respiration", x = "Time (years)", y = "Respiration Rate (gC per m2 per year)")
+
+
+Incu_Stocks_time.plot <- ggplot(Incubation_Sim_comp.df %>% filter(time <= 5) %>% filter(Model != "Input") %>% select(c("time","Soil_Carbon_Concentration", "Model"))) +
+  geom_line(aes(x=time, y=Soil_Carbon_Concentration, color=Model)) + 
+  labs(x = "Time (years)", y = "SOC (gC per m2)")
+
+Incu_Stocks_time.plot + 
+  labs(title = "Incubation Simulation", subtitle = "Carbon Stocks")
+
+Incu_Resp_time.plot <- ggplot(Incubation_Sim_comp.df %>% filter(time <= 5)) +
+  geom_line(aes(x=time, y=Rate, color=Model)) +
+  labs(x = "Time (years)", y = "Rate (gC per m2 per year)")
+
+Incu_Resp_time.plot + 
+  labs(title = "Incubation Simulation", subtitle = "Respiration")
+
+
+temp<- Incubation_Sim_comp.df %>% 
+        select(c(time, Model, Soil_Carbon_Concentration))%>%
+        filter(Model != "Input") %>%
+         pivot_wider(names_from = Model,
+                     values_from = Soil_Carbon_Concentration)%>%
+  filter(time <=3)
+
+high <- max(temp["OnePool"], temp["FivePool"])
+low <- min(temp["OnePool"], temp["FivePool"])
+
+Incu_Stocks_M2M.plot <-ggplot(temp) +
+  geom_point(aes(x=FivePool, y = OnePool), alpha = 0.5) +
+  geom_abline(color='red') +
+  lims(x=c(low,high), y=c(low,high)) + 
+  labs(title = 'Incubation SOC stock', subtitle = "(gC per m2)")
+
+temp<- Incubation_Sim_comp.df %>% 
+      filter(Rate_Type != "Input_Rate") %>%
+        select(c(time, Model, Rate)) %>%
+         pivot_wider(names_from = Model,
+                     values_from = Rate) %>%
+  mutate("Difference" = OnePool-FivePool) %>%
+  mutate("DifferenceRelativeToFivePoolModel" = (Difference/FivePool)*100) %>%
+  filter(time <=3)
+
+
+IncubPercentage.df <- data.frame(temp["time"], temp["DifferenceRelativeToFivePoolModel"])
+
+ggplot(temp %>% filter(time <=5)) + 
+  geom_line(aes(x=time, y=DifferenceRelativeToFivePoolModel))
+
+high <- max(temp["OnePool"], temp["FivePool"])
+low <- min(temp["OnePool"], temp["FivePool"])
+
+Incu_Resp_M2M.plot <- ggplot(temp) +
+  geom_point(aes(x=FivePool, y = OnePool), alpha = 0.5) +
+  geom_abline(color='red') +
+  lims(x=c(low,high), y=c(low,high)) + 
+  labs(title = 'Incubation Respiration Rate', subtitle = "(gC per m2 per year)")
+
+Incu_Stocks_M2M.plot
+Incu_Resp_M2M.plot
+```
+
+
+
+```{r }
+Incu_Stocks_time.plot + ggtitle('Incubation stock') + theme_bw() + Incu_Resp_time.plot + ggtitle('Incubation Respiration') + theme_bw() + 
+  Seas_Stocks_time.plot + ggtitle('Seasonal Variation stock') + theme_bw()  + Seas_Resp_time.plot + ggtitle('Seasonal Variation Respiration') + theme_bw()  +  
+  plot_layout(guides = "collect") + plot_annotation(title = "Simulations",
+    theme = theme(plot.title = element_text(hjust = 0.5))) & theme(legend.position = 'bottom')
+
+
+ggsave("SimulationFig.png", width = 6, height = 6, 
+       dpi = 300, units = "in")
+
+
+Incu_Stocks_M2M.plot + theme_bw() + Incu_Resp_M2M.plot + theme_bw() + 
+  Seas_Stocks_M2M.plot + theme_bw()  + Seas_Resp_M2M.plot + theme_bw()  +  
+  plot_layout(axis = "collect") + plot_annotation(title = "Model Comparisons")
+
+ggsave("ComparisonFig.png", width = 6, height = 6, 
+       dpi = 300, units = "in")
+
+```

@@ -76,10 +76,6 @@ constant.fn <- function(time, parms){
 }
 
 
-incubation.fn <- function(time, parms){
-  return(0)
-}
-
 seasonal.fn <- function(time, parms){
   inputs <- (5/300)*sin((pi/6)*time+(3*pi/2))+(5/300) 
   return(inputs)
@@ -279,9 +275,10 @@ source("R/FivePool_ODE.R")
 
 Params_FivePool.ls <- list(
                   ##Input-based parameters (such as allocation)
-                  inputs = 260,
+                  ave_inputs = 260,
                         #CENUTRY model uses 260 grams C per m^2 per year
                         #u; kg-carbon m-2 yr-1, 
+                  # inputs.fn = constant.fn, ##Needs to be added in seperately
                     input_to_struc = 2/9,  
                     input_to_meta = 7/9,  
                         #C goes through litter pools first
@@ -330,6 +327,20 @@ Params_FivePool.ls <- list(
                         passive_to_struc = 0
                        )
 
+
+# # For other Markdowns:
+# write_csv(as.data.frame(Params_FivePool.ls), file = "Data/FivePoolModel_Parameters.csv")
+# 
+# Params_FivePool.df <- read_csv(file.path("Data/FivePoolModel_Parameters.csv"), show_col_types = FALSE)
+# Parms_FivePool.ls <- list()
+# 
+# for(i in 1:ncol(Params_FivePool.df)) {
+#   Parms_FivePool.ls[[i]] <- as.numeric(Params_FivePool.df[,i])
+# }
+# names(Parms_FivePool.ls) <- colnames(Params_FivePool.df)
+
+
+Params_FivePool.ls$inputs.fn <- constant.fn
 
 ```
 
