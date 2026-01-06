@@ -221,7 +221,9 @@ Params_FivePool.ls$NPPshift <- NPP_shifts[i]
 
 Forward.gr <- ggplot(NPPshift_Sim1.df) +
   geom_line(aes(x=time,
-                y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)),
+                y=Soil_Carbon_Concentration/sum(
+                  FivePool_SS.fn(parms = Params_FivePool.ls)
+                  ),
                 color=inputs_shift), linetype="dashed", linewidth = 1) +
   geom_line(data = NPPshift_Sim5.df, aes(x=time, y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)), color=inputs_shift), linetype="solid") +
   theme_get()+
@@ -231,7 +233,10 @@ Forward.gr <- ggplot(NPPshift_Sim1.df) +
 
 Forward_log10.gr <- ggplot(NPPshift_Sim1.df) +
   geom_line(aes(x=time,
-                y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)),
+                y=Soil_Carbon_Concentration/sum(
+                  FivePool_SS.fn(parms = Params_FivePool.ls)
+                  ),
+                group=inputs_shift,
                 color=inputs_shift), linetype="dashed", linewidth = 1) +
   geom_line(data = NPPshift_Sim5.df, aes(x=time, y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)), color=inputs_shift), linetype="solid") +
   scale_x_log10() +
@@ -280,7 +285,8 @@ Diff_log10.gr <- ggplot(NPPshift_Sim_comp.df) +
                 color = inputs_shift)) +
   scale_x_log10()
 
-(Forward.gr + Forward_log10.gr) / (Diff.gr + Diff_log10.gr) 
+(Forward.gr + Forward_log10.gr) / (Diff.gr + Diff_log10.gr) +
+  plot_layout(widths = c(1, 2))
 
 
 
@@ -316,7 +322,7 @@ temp5.df <- data.frame(time=as.numeric(),
                                Model = as.character())
 
 #Granularity of Heatmap
-NPP_shifts <- seq(0.5, 1.5, by = 0.05)
+NPP_shifts <- seq(0.5, 1.5, by = 0.01)
 
 
 ##### SIMULATION #####
@@ -403,7 +409,7 @@ Heatmap_sim <- full_join(temp1.df,temp5.df) %>%
     FivePool_SS.fn(
       parms = Params_FivePool.ls
     )
-  )
+  ))
 
 
 ggplot(Heatmap_sim) + 
@@ -413,6 +419,57 @@ ggplot(Heatmap_sim) +
 ggsave("test.pdf")
 
 ```
+
+```{r}
+Comp <- Heatmap_sim %>%
+  select(!c("SOC_ratio_to_SS")) %>%
+  pivot_wider(names_from = Model, values_from = Soil_Carbon_Concentration) %>%
+  mutate(Diff = FivePool - OnePool) %>%
+  mutate(Diffperc = abs(Diff/sum(
+    FivePool_SS.fn(
+      parms = Params_FivePool.ls
+    )))) %>%
+  mutate(LT10 = (Diffperc < 0.1),
+         LT01 = (Diffperc < 0.01),
+         LT001 = (Diffperc < 0.001))
+
+Diff.graph <- ggplot() + 
+  geom_point(data = Comp %>% 
+               filter(LT10 == TRUE),
+             aes(x = as.numeric(inputs_shift), 
+                 y = time),
+             color = "grey"
+             )+ 
+  geom_point(data = Comp %>% 
+               filter(LT01 == TRUE),
+             aes(x = as.numeric(inputs_shift), 
+                 y = time,
+             color = inputs_shift)
+             )+ 
+  geom_point(data = Comp %>% 
+               filter(LT001 == TRUE),
+             aes(x = as.numeric(inputs_shift), 
+                 y = time),
+             color = "black"
+             ) 
+
+Diff.graph +
+  labs(#title = "Regime Shift",
+       subtitle = "Accuracy of One-Pool to Five-Pool model within 10%, 1%, and 0.1% of original steady state",
+       x = "Shift in NPP",
+       y = "Time (years)") + 
+  theme_bw() +  
+theme(#plot.title = element_text(size = 20),  
+plot.subtitle = element_text(size = 20),
+strip.text = element_text(size=18),  
+axis.text = element_text(size=15),  
+axis.title = element_text(size=18),  
+legend.position="none") 
+
+ggsave("RegimeDiff.pdf", height=9, width=12)
+
+```
+
 
 
 
