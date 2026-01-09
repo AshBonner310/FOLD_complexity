@@ -11,6 +11,7 @@ library(tidyverse) #data library
 library(deSolve) #ODE solver
 library(patchwork) #figure arrangement
 library(dplyr) #data wrangling
+library(ggplot2)
 
 knitr::opts_chunk$set(echo = TRUE)
 
@@ -49,7 +50,7 @@ Params_Aggregate.ls <- list(ave_inputs = Params_FivePool.ls$ave_inputs, #g-C m-2
 
 
 
-# Regime Shift - new input levels
+# Regime Shift - input levels
 
 Modeling soil carbon in earth systems (such as forecasting carbon totals for climate change) want to capture how soil carbon stocks respond to natural and unnatural dynamics and fluctuations.
 In temperate systems, a seasonal fluctuation in Vegetation Biomass' Net Primary Productivity is well established.
@@ -61,7 +62,7 @@ We'll use a weekly simulation over five years to determine fit.
 ##define a function where inputs shift after a year
 NPPshift.fn <- function(time, parms){
   
-  if(time < 0.25){
+  if(time == 0){
     u <- parms$ave_inputs
   }else{
     u <- parms$ave_inputs*parms$NPPshift
@@ -71,18 +72,17 @@ NPPshift.fn <- function(time, parms){
 }
 
 # #Simulation Times vector
-SimTimes <- c(seq(0, 1, by = 1/12),
-              seq(1, 10, by = 1),
-              seq(10, 100, by = 10),
-              seq(100, 1e4, by = 100),
-              seq(1e4, 1e6, by = 1e4)) %>%
+SimTimes <- c(seq(0, 50, by = 1/12), # first ten years, by month
+              seq(1, 10, by = 1), # up to ten years, by year
+              seq(10, 1e3, by = 10), # up to thousand years, by decade
+              seq(1e3, 2e4, by = 100) # up to twenty thousand years, by century
+              ) %>%
   unique()
   
-  # seq(0, 1e6, by = 1)
 
 Inputs_sim <- as.data.frame(SimTimes)
 
-NPP_shifts <- c(0.5, 0.9, 1, 1.1, 1.5)
+NPP_shifts <- c(0, 0.25, 0.5, 0.75, 0.9, 0.95, 1, 1.05, 1.1, 1.25, 1.5, 1.75, 2)
 
 for(i in 1:length(NPP_shifts)){
 
@@ -142,17 +142,23 @@ Params_Aggregate.ls$NPPshift <- NPP_shifts[i]
 
 }
 
-##Graph both shifts with the one pool model
-ggplot(NPPshift_Sim1.df %>% pivot_longer(cols = Soil_Carbon_Concentration:Input_Rate,
-                               names_to = "Pool",
-                               values_to = "Mass")) + 
-  geom_line(aes(x=time, y=Mass, color=inputs_shift)) + 
-  facet_wrap(~ Pool, ncol=1, scales='free') + 
-  labs(title = "Seasonal Simulation: One Pool", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
-
+# ##Graph both shifts with the one pool model
+# ggplot(NPPshift_Sim1.df %>%
+#          select(time, Respiration_Rate, Input_Rate, inputs_shift) %>% 
+#          pivot_longer(cols = Respiration_Rate:Input_Rate,
+#                                names_to = "Rate",
+#                                values_to = "Value")) + 
+#   geom_line(aes(x=time, y=Value, color=inputs_shift)) + 
+#   facet_wrap(~ Rate, ncol=1, scales='free') + 
+#   labs(title = "Regime Shifts: One Pool", x = "Time (years)", y = "Carbon per hour (gC per m2)")
+# 
+# ggplot(NPPshift_Sim1.df %>%
+#          select(time, Soil_Carbon_Concentration, inputs_shift)) + 
+#   geom_line(aes(x=time, y=Soil_Carbon_Concentration, color=inputs_shift)) + 
+#   labs(title = "Regime Shifts: One Pool", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
 
 ####FIVE POOL SIMULATIONS
-##Add needed functino to parameter list for Five Pool simulations
+##Add needed function to parameter list for Five Pool simulations
 Params_FivePool.ls$inputs.fn <- NPPshift.fn
 
 
@@ -203,107 +209,1066 @@ Params_FivePool.ls$NPPshift <- NPP_shifts[i]
  
 }
 
-ggplot(NPPshift_Sim5.df %>% pivot_longer(cols = Metabolic_Plant_Residue:Input_Rate,
-                               names_to = "Pool",
-                               values_to = "Mass")) + 
-  geom_line(aes(x=time, y=Mass, color = inputs_shift)) + 
-  facet_wrap(~ Pool, ncol=1, scales='free') + 
-  labs(title = "Seasonal Simulation:Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "SOC (gC per m2) or Rate  (gC per m2 per year)")
+# ggplot(NPPshift_Sim5.df %>% pivot_longer(cols = Metabolic_Plant_Residue:Input_Rate,
+#                                names_to = "Pool",
+#                                values_to = "Mass")) + 
+#   geom_line(aes(x=time, y=Mass, color = inputs_shift)) + 
+#   facet_wrap(~ Pool, ncol=1, scales='free') + 
+#   labs(title = "Regime Shift", subtitle = "Stacked Carbon Stocks and Rates by Pool", x = "Time (years)", y = "SOC (gC per m2) or Rate  (gC per m2 per year)")
+# 
+# 
+# 
+# ggplot(NPPshift_Sim5.df %>%
+#          mutate(Plant_Residue = Metabolic_Plant_Residue + Structural_Plant_Residue) %>%
+#          select(!c('Respiration_Rate', 'Metabolic_Plant_Residue', 'Structural_Plant_Residue')) %>%
+#          pivot_longer(cols = c('Fast_Soil', 'Slow_Soil', 'Passive_Soil', 'Plant_Residue'),
+#                                   names_to = 'Pool',
+#                                   values_to = 'Mass')) + 
+#   geom_line(aes(x=time, y=Mass, color = inputs_shift)) +
+#   facet_wrap(~ Pool, ncol=1, scales='free') + 
+#   labs(title = "Regime Shift", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "SOC (gC per m2)")
+# 
+# 
+# ggplot(NPPshift_Sim5.df %>%
+#          mutate(Plant_Residue = Metabolic_Plant_Residue + Structural_Plant_Residue) %>%
+#          select(!c('Respiration_Rate', 'Metabolic_Plant_Residue', 'Structural_Plant_Residue')) %>%
+#          pivot_longer(cols = c('Fast_Soil', 'Slow_Soil', 'Passive_Soil', 'Plant_Residue', 'Soil_Carbon_Concentration'),
+#                                   names_to = 'Pool',
+#                                   values_to = 'Mass')) +
+#   geom_line(aes(x=time, y=Mass, color = inputs_shift, linetype = Pool)) + 
+#   labs(title = "Regime Shift: Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
 
 
-ggplot(NPPshift_Sim5.df %>%
-         mutate(Plant_Residue = Metabolic_Plant_Residue + Structural_Plant_Residue) %>%
-         select(!c('Respiration_Rate', 'Metabolic_Plant_Residue', 'Structural_Plant_Residue')) %>%
-         pivot_longer(cols = c('Fast_Soil', 'Slow_Soil', 'Passive_Soil', 'Plant_Residue', 'Soil_Carbon_Concentration'),
-                                  names_to = 'Pool',
-                                  values_to = 'Mass')) +
-  geom_line(aes(x=time, y=Mass, color = Pool, linetype = inputs_shift)) + 
-  labs(title = "Seasonal Simulation: Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
+
+# ggplot(NPPshift_Sim1.df) + 
+#   geom_line(aes(x=time, 
+#                 y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)),
+#                 color=inputs_shift), linetype="dashed") +
+#   geom_line(data = NPPshift_Sim5.df, aes(x=time, y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)), color=inputs_shift), linetype="dotted") + 
+#   scale_x_log10() + 
+#   labs(title = "Regime Shift: Log10 scaled time",
+#        y = "Ratio of SOC to initial value",
+#        x = "Time (years), log10-scaled")
+
+Initial_Sim_Runs.df <- full_join(NPPshift_Sim1.df %>%
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "One Pool"), 
+                  NPPshift_Sim5.df %>% 
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "Five Pool"),
+                  by = join_by(time, Soil_Carbon_Concentration, inputs_shift, model)) %>%
+  mutate(Soil_Carbon_Concentration = Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>% 
+  mutate("Shift in NPP" = as.numeric(inputs_shift))
+
+```
+
+```{r first plot}
+
+
+temp.graph <- ggplot(Initial_Sim_Runs.df) + 
+  geom_line(data = Initial_Sim_Runs.df %>% filter(model == "One Pool"),
+             aes(x=time, 
+                y=Soil_Carbon_Concentration,
+                color = `Shift in NPP`, #inputs_shift,
+                group = `Shift in NPP`),
+            linetype = "solid",
+            linewidth = 0.25) + 
+  geom_line(data = Initial_Sim_Runs.df %>% filter(model == "Five Pool"),
+             aes(x=time, 
+                y=Soil_Carbon_Concentration,
+                color = `Shift in NPP`, #inputs_shift,
+                group = `Shift in NPP`),
+            linetype = "dashed",
+            linewidth = 0.25) + 
+  scale_x_log10() +
+  labs(linetype = "Model") + 
+  theme_bw() #+ 
+  #guides(colour = "none") 
+
+Initial_Sim.graph <- temp.graph + 
+  labs(title = "Regime Shift Forward Run",
+       x = "Time (years)",
+       y = "Ratio of SOC to initial value",
+       linetype = "Model") +
+  theme(text = element_text(size = 9),
+        axis.title.y = element_text(size = 8),
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 6),
+        legend.justification = "center")
+
+Initial_Sim.graph
+
+```
+
+
+```{r}
+ggsave("Figures/RegimeShift_SOC_Forward_Runs.pdf",
+       plot = Initial_Sim.graph,
+        device = pdf, 
+       width = 8.7,
+       height = 5,
+       units = "cm")
+  
+
+# ggplot(Initial_Sim_Runs.df) + 
+#   geom_line(aes(x=time, 
+#                 y=Soil_Carbon_Concentration,
+#                 color=inputs_shift, 
+#                 linetype = model)) + 
+#   labs(title = "Regime Shift",
+#        y = "Ratio of SOC to initial value",
+#        x = "Time (years)")
+
+Difference.df <- full_join(NPPshift_Sim1.df %>%
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "One Pool"), 
+                  NPPshift_Sim5.df %>% 
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "Five Pool")) %>%
+  pivot_wider(names_from = model,
+              values_from = Soil_Carbon_Concentration) %>%
+  mutate(Difference = `Five Pool` - `One Pool`) 
+
+
+ggplot(Difference.df%>%
+  mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
+  geom_line(aes(x=time, y=Difference, color = inputs_shift))
+
+ggplot(Difference.df%>%
+  mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
+  geom_line(aes(x=time, y=Difference, color = inputs_shift)) + scale_x_log10()
 
 
 
-ggplot(NPPshift_Sim1.df) + 
+# temp <- NPPshift_Sim5.df%>% 
+#          select(time, Metabolic_Plant_Residue, Structural_Plant_Residue, Fast_Soil, Slow_Soil, Passive_Soil, inputs_shift) %>%
+#          pivot_longer(cols = Metabolic_Plant_Residue:Passive_Soil,
+#                                   names_to = 'Pool',
+#                                   values_to = 'Mass')
+# 
+# temp$Pool <- factor(temp$Pool, levels = c("Metabolic_Plant_Residue", "Structural_Plant_Residue", "Fast_Soil", "Slow_Soil", "Passive_Soil"))
+# 
+# ggplot(temp) + 
+#   geom_line(aes(x=time, y=Mass, color = inputs_shift)) + 
+#   facet_wrap(~ Pool, ncol=1, scales='free') 
+# 
+# ggplot(temp) +
+#   geom_area(aes(x=time, y=Mass, fill = Pool)) +
+#   scale_fill_brewer(palette = "Spectral") +
+#   facet_wrap(~ inputs_shift, ncol=1, scales='free') 
+# 
+# 
+# ggplot(temp) +
+#   geom_area(aes(x=time, y=Mass, fill = Pool)) +
+#   scale_fill_brewer(palette = "Spectral") +
+#   facet_wrap(~ inputs_shift, ncol=1, scales='free') 
+# 
+# 
+# temp <- temp %>%
+#   filter(inputs_shift == 0)
+# 
+# 
+# ggplot(temp) +
+#   geom_area(aes(x=time, y=Mass, fill = Pool)) +
+#   scale_fill_brewer(palette = "Spectral") +
+#   scale_x_log10()
+# 
+# ggplot(temp) +
+#   geom_area(aes(x=time, y=Mass, fill = Pool)) +
+#   scale_fill_brewer(palette = "Spectral") 
+# 
+# ggplot(temp %>% 
+#          filter(time <= 100)) +
+#   geom_area(aes(x=time, y=Mass, fill = Pool)) +
+#   scale_fill_brewer(palette = "Spectral") 
+
+```
+
+
+```{r Difference Analysis}
+  
+  
+temp <- Difference.df %>%
+  mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
+  mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
+  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-2)) %>%
+         mutate("Shift in NPP" = as.numeric(inputs_shift))
+  
+
+# ggplot(temp) +
+#   geom_line(aes(x=time, y=`Normalized Difference to OG steady state`, color=inputs_shift))
+
+Forward_Run_Difference.graph <- ggplot(temp) +
   geom_line(aes(x=time, 
-                y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)),
-                color=inputs_shift), linetype="dashed") +
-  geom_line(data = NPPshift_Sim5.df, aes(x=time, y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)), color=inputs_shift), linetype="dotted") + 
-  scale_x_log10()
+                y=`Normalized Difference to OG steady state`, 
+                color= inputs_shift),
+            linewidth = 0.4) + 
+  scale_x_log10() + 
+  theme_bw() + 
+  labs(y = "Difference (% of Original State)",
+       x = "Time (years)",
+      color = "Shift in NPP") +
+  guides(color = guide_legend(override.aes = list(linewidth = 1))) +
+  theme(text = element_text(size = 9),
+        axis.title.y = element_text(size = 8),
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 6),
+        legend.justification = "center", 
+        legend.key.size = unit(0.2, "lines"))
 
-temp <- NPPshift_Sim5.df%>% 
-         select(time, Metabolic_Plant_Residue, Structural_Plant_Residue, Fast_Soil, Slow_Soil, Passive_Soil, inputs_shift) %>%
-         pivot_longer(cols = Metabolic_Plant_Residue:Passive_Soil,
-                                  names_to = 'Pool',
-                                  values_to = 'Mass')
 
-temp$Pool <- factor(temp$Pool, levels = c("Metabolic_Plant_Residue", "Structural_Plant_Residue", "Fast_Soil", "Slow_Soil", "Passive_Soil"))
+
+Temp_Initial_Sim.graph <- temp.graph + 
+  labs(y = "Ratio of SOC to initial value",
+       x = "Time (years)") +
+  theme(text = element_text(size = 9),
+        axis.title.y = element_text(size = 8),
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 6),
+        legend.justification = "center", 
+        legend.key.size = unit(0.3, "lines"))
+
+
+
+Temp_Initial_Sim.graph  / Forward_Run_Difference.graph +   
+  plot_layout(axes = "collect", 
+              guides = 'collect')
+
+
+ggsave("Figures/RegimeShift_SOC_Forward_Runs_Difference.pdf",
+       device = pdf, 
+       width = 17.8,
+       height = 9,
+       units = "cm")
+
+
+
+
+# ggplot(temp %>% filter(inputs_shift != "0")) +
+#   geom_line(aes(x=time, y=`Normalized Difference to Five Pool model`, color=inputs_shift))
+# 
+# ggplot(temp %>% filter(inputs_shift != "0")) +
+#   geom_line(aes(x=time, y=`Normalized Difference to Five Pool model`, color=inputs_shift)) + 
+#   ylim(-0.35,0.35) +
+#   scale_x_log10()
+
+
+
+Full_Run_Comp.graph <- ggplot(temp %>% 
+         filter(Close == "TRUE")
+         ) + 
+  geom_point(aes(x=time, y=`Shift in NPP`, color = inputs_shift)) + xlim(0, 1e4)
+
+
+
+# temp_graph <- ggplot(temp %>% 
+#          filter(time <=20) %>%
+#          filter(Close == "TRUE") %>%
+#          mutate("NPP Shift" = as.numeric(inputs_shift))) + 
+#   geom_point(aes(x=time, y=`NPP Shift`, color = inputs_shift), size = 1) +
+#   labs(title = "",
+#        x = "Time (years)",
+#        y = "Relative Shift in NPP",
+#        color = "Shift") + 
+#     theme_bw()+
+#   theme(text = element_text(size = 9),
+#         axis.title.y = element_text(size = 8),
+#         legend.title = element_text(size = 6),
+#         legend.text = element_text(size = 6),
+#         legend.justification = "center")
+
+Full_Run_Comp.graph +
+  labs(title = "",
+       x = "Time (years)",
+       y = "Relative Shift in NPP",
+       color = "Shift") + 
+    theme_bw()+
+  theme(text = element_text(size = 9),
+        axis.title.y = element_text(size = 8),
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 6),
+        legend.justification = "center")
+
+ggsave("Figures/RS_SOC_Difference_Full.pdf",
+       plot = temp_graph,
+        device = pdf, 
+       width = 8.7,
+       height = 5,
+       units = "cm")
+
+
+# ggplot(temp %>% filter(time <= 5)) +
+#   geom_line(aes(x=time, y=`Normalized Difference to Five Pool model`, color=inputs_shift))
+
+
+
+```
+
+
+```{r Simulations-short_time}
+###AGGREGATE DECAY RATE ONE POOL SIMULATIONS
+
+NPP_shifts <- seq(0.1, 2, by = 0.05)
+SimTimes <- seq(0, 50, by = 1/12)
+
+
+#creating an empty data frame to populate through for loop
+NPPshift_Sim1.df <- data.frame(time=as.numeric(),
+                               Soil_Carbon_Concentration=as.numeric(),
+                               Respiration_Rate=as.numeric(),
+                               Input_Rate=as.numeric(),
+                               inputs_shift=as.character())
+
+for(i in 1:length(NPP_shifts)){
+
+Params_Aggregate.ls$NPPshift <- NPP_shifts[i] 
+
+ temp <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  "Soil_Carbon_Concentration" = sum(FivePool_SS.fn(parms = Params_FivePool.ls))),
+                times = SimTimes,
+                func = OnePool_ODE.fn,
+                parms = Params_Aggregate.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Respiration_Rate = OnePool_ODE.fn(t = 1, 
+                                           y = c(NA, Soil_Carbon_Concentration),
+                                           parms = Params_Aggregate.ls
+                            )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    ) %>%
+  mutate(Input_Rate = Params_Aggregate.ls$inputs.fn(t = time,
+                                                  parms = Params_Aggregate.ls),
+         .by = everything()) %>%
+  mutate(inputs_shift = as.character(NPP_shifts[i]) )
+ 
+ NPPshift_Sim1.df <- full_join(NPPshift_Sim1.df, 
+                               temp, 
+                               by = join_by(time, Soil_Carbon_Concentration, Respiration_Rate, Input_Rate, inputs_shift))
+
+}
+
+
+####FIVE POOL SIMULATIONS
+##Add needed function to parameter list for Five Pool simulations
+
+#creating an empty data frame to populate through for loop
+NPPshift_Sim5.df <- data.frame(time=as.numeric(),
+                               Metabolic_Plant_Residue=as.numeric(),
+                               Structural_Plant_Residue=as.numeric(),
+                               Fast_Soil=as.numeric(),
+                               Slow_Soil=as.numeric(),
+                               Passive_Soil=as.numeric(),
+                               Soil_Carbon_Concentration=as.numeric(),
+                               Respiration_Rate=as.numeric(),
+                               Input_Rate=as.numeric(),
+                               inputs_shift=as.character())
+
+for(i in 1:length(NPP_shifts)){
+
+Params_FivePool.ls$NPPshift <- NPP_shifts[i] 
+
+ temp <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  FivePool_SS.fn(parms = Params_FivePool.ls)),
+                times = SimTimes,
+                func = FivePool_ODE.fn,
+                parms = Params_FivePool.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Soil_Carbon_Concentration = Metabolic_Plant_Residue + Structural_Plant_Residue + Fast_Soil + Slow_Soil + Passive_Soil) %>%
+  mutate(Respiration_Rate = FivePool_ODE.fn(t = 1, 
+                                           y = c("Cumulative_Respiration" = 0, 
+                                                Metabolic_Plant_Residue = Metabolic_Plant_Residue,
+                                                Structural_Plant_Residue = Structural_Plant_Residue,
+                                                Fast_Soil = Fast_Soil,
+                                                Slow_Soil = Slow_Soil,
+                                                Passive_Soil = Passive_Soil),
+                                            parms = Params_FivePool.ls
+                                  )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )%>%
+  mutate(Input_Rate = Params_FivePool.ls$inputs.fn(t = time,
+                                                  parms = Params_FivePool.ls),
+         .by = everything()
+  ) %>%
+  mutate(inputs_shift = as.character(NPP_shifts[i]) )
+ 
+  NPPshift_Sim5.df <- full_join(NPPshift_Sim5.df, 
+                               temp,
+                               by = join_by(time, Metabolic_Plant_Residue, Structural_Plant_Residue, Fast_Soil, Slow_Soil, Passive_Soil, Soil_Carbon_Concentration, Respiration_Rate, Input_Rate, inputs_shift))
+ 
+}
+
+
+temp <- full_join(NPPshift_Sim1.df %>%
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "One Pool"), 
+                  NPPshift_Sim5.df %>% 
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "Five Pool")) %>%
+  mutate(Soil_Carbon_Concentration = Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))
+
 
 ggplot(temp) + 
-  geom_line(aes(x=time, y=Mass, color = inputs_shift)) + 
-  facet_wrap(~ Pool, ncol=1, scales='free') 
+  geom_line(aes(x=time, 
+                y=Soil_Carbon_Concentration,
+                color=inputs_shift, 
+                linetype = model)) + 
+  scale_x_log10() + 
+  labs(title = "Regime Shift: Log10 scaled time",
+       y = "Ratio of SOC to initial value",
+       x = "Time (years), log10-scaled")
 
-ggplot(temp) +
-  geom_area(aes(x=time, y=Mass, fill = Pool)) +
-  scale_fill_brewer(palette = "Spectral") +
-  facet_wrap(~ inputs_shift, ncol=1, scales='free') 
+ggplot(temp) + 
+  geom_line(aes(x=time, 
+                y=Soil_Carbon_Concentration,
+                color=inputs_shift, 
+                linetype = model)) + 
+  labs(title = "Regime Shift: Log10 scaled time",
+       y = "Ratio of SOC to initial value",
+       x = "Time (years)")
+
+Difference.df <-  temp <- full_join(NPPshift_Sim1.df %>%
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "One Pool"), 
+                  NPPshift_Sim5.df %>% 
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "Five Pool")) %>%
+  pivot_wider(names_from = model,
+              values_from = Soil_Carbon_Concentration) %>%
+  mutate(Difference = `Five Pool` - `One Pool`) 
+
+
+ggplot(Difference.df%>%
+  mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
+  geom_line(aes(x=time, y=Difference, color = inputs_shift))
+
+ggplot(Difference.df%>%
+  mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
+  geom_line(aes(x=time, y=Difference, color = inputs_shift)) + scale_x_log10()
+
+
+
+###Graphs for within 1% of each other
+
+temp1 <- Difference.df %>%
+  mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
+  mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
+  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-2))%>% 
+         filter(Close == "TRUE") %>%
+         mutate("NPP Shift" = as.numeric(inputs_shift))
+
+temp.01 <- Difference.df %>%
+  mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
+  mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
+  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-3))%>% 
+         filter(Close == "TRUE") %>%
+         mutate("NPP Shift" = as.numeric(inputs_shift))
+
+temp5 <- Difference.df %>%
+  mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
+  mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
+  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 5e-2)) %>% 
+         filter(Close == "TRUE") %>%
+         mutate("NPP Shift" = as.numeric(inputs_shift))
+
+
+temp_graph <- ggplot(temp1) + 
+  geom_point(aes(y=time, x=`NPP Shift`, color = inputs_shift), size = 1, shape = 15) +
+  geom_point(data = temp5, aes(y=time, x=`NPP Shift`, color = inputs_shift), size = 0.5, shape = 1, alpha = 0.1) +
+  geom_point(data = temp.01, aes(y=time, x=`NPP Shift`), size = 1, shape = 4) +
+  labs(title = "Length of Simulation where Models agree",
+       subtitle = "One-pool within 5%, 1%, and 0.1% of the five-pool",
+       y = "Time (years)",
+       x = "Relative Shift in NPP (%)",
+       color = "Shift") + 
+    theme_bw()+
+  theme(text = element_text(size = 9),
+        axis.title.y = element_text(size = 8),
+        plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 7),
+        legend.title = element_text(size = 6),
+        legend.position = "none") 
+
+# ggsave("Figures/RS_SOC_Difference.pdf",
+#        plot = temp_graph,
+#         device = pdf, 
+#        width = 8.7,
+#        height = 7,
+#        units = "cm")
+
+temp_graph
+
+```
+
+```{r Even More Granularity}
+###AGGREGATE DECAY RATE ONE POOL SIMULATIONS
+
+NPP_shifts <- seq(0.75, 1.25, by = 0.001)
+SimTimes <- seq(0, 100, by = 1/12)
+
+
+#creating an empty data frame to populate through for loop
+NPPshift_Sim1.df <- data.frame(time=as.numeric(),
+                               Soil_Carbon_Concentration=as.numeric(),
+                               Respiration_Rate=as.numeric(),
+                               Input_Rate=as.numeric(),
+                               inputs_shift=as.character())
+
+for(i in 1:length(NPP_shifts)){
+
+Params_Aggregate.ls$NPPshift <- NPP_shifts[i] 
+
+ temp <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  "Soil_Carbon_Concentration" = sum(FivePool_SS.fn(parms = Params_FivePool.ls))),
+                times = SimTimes,
+                func = OnePool_ODE.fn,
+                parms = Params_Aggregate.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Respiration_Rate = OnePool_ODE.fn(t = 1, 
+                                           y = c(NA, Soil_Carbon_Concentration),
+                                           parms = Params_Aggregate.ls
+                            )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    ) %>%
+  mutate(Input_Rate = Params_Aggregate.ls$inputs.fn(t = time,
+                                                  parms = Params_Aggregate.ls),
+         .by = everything()) %>%
+  mutate(inputs_shift = as.character(NPP_shifts[i]) )
+ 
+ NPPshift_Sim1.df <- full_join(NPPshift_Sim1.df, 
+                               temp, 
+                               by = join_by(time, Soil_Carbon_Concentration, Respiration_Rate, Input_Rate, inputs_shift))
+
+}
+
+
+####FIVE POOL SIMULATIONS
+##Add needed function to parameter list for Five Pool simulations
+
+#creating an empty data frame to populate through for loop
+NPPshift_Sim5.df <- data.frame(time=as.numeric(),
+                               Metabolic_Plant_Residue=as.numeric(),
+                               Structural_Plant_Residue=as.numeric(),
+                               Fast_Soil=as.numeric(),
+                               Slow_Soil=as.numeric(),
+                               Passive_Soil=as.numeric(),
+                               Soil_Carbon_Concentration=as.numeric(),
+                               Respiration_Rate=as.numeric(),
+                               Input_Rate=as.numeric(),
+                               inputs_shift=as.character())
+
+for(i in 1:length(NPP_shifts)){
+
+Params_FivePool.ls$NPPshift <- NPP_shifts[i] 
+
+ temp <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  FivePool_SS.fn(parms = Params_FivePool.ls)),
+                times = SimTimes,
+                func = FivePool_ODE.fn,
+                parms = Params_FivePool.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Soil_Carbon_Concentration = Metabolic_Plant_Residue + Structural_Plant_Residue + Fast_Soil + Slow_Soil + Passive_Soil) %>%
+  mutate(Respiration_Rate = FivePool_ODE.fn(t = 1, 
+                                           y = c("Cumulative_Respiration" = 0, 
+                                                Metabolic_Plant_Residue = Metabolic_Plant_Residue,
+                                                Structural_Plant_Residue = Structural_Plant_Residue,
+                                                Fast_Soil = Fast_Soil,
+                                                Slow_Soil = Slow_Soil,
+                                                Passive_Soil = Passive_Soil),
+                                            parms = Params_FivePool.ls
+                                  )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )%>%
+  mutate(Input_Rate = Params_FivePool.ls$inputs.fn(t = time,
+                                                  parms = Params_FivePool.ls),
+         .by = everything()
+  ) %>%
+  mutate(inputs_shift = as.character(NPP_shifts[i]) )
+ 
+  NPPshift_Sim5.df <- full_join(NPPshift_Sim5.df, 
+                               temp,
+                               by = join_by(time, Metabolic_Plant_Residue, Structural_Plant_Residue, Fast_Soil, Slow_Soil, Passive_Soil, Soil_Carbon_Concentration, Respiration_Rate, Input_Rate, inputs_shift))
+ 
+}
+
+
+temp <- full_join(NPPshift_Sim1.df %>%
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "One Pool"), 
+                  NPPshift_Sim5.df %>% 
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "Five Pool")) %>%
+  mutate(Soil_Carbon_Concentration = Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))
+
+
+# ggplot(temp) + 
+#   geom_line(aes(x=time, 
+#                 y=Soil_Carbon_Concentration,
+#                 color=inputs_shift, 
+#                 linetype = model)) + 
+#   scale_x_log10() + 
+#   labs(title = "Regime Shift: Log10 scaled time",
+#        y = "Ratio of SOC to initial value",
+#        x = "Time (years), log10-scaled")
+# 
+# ggplot(temp) + 
+#   geom_line(aes(x=time, 
+#                 y=Soil_Carbon_Concentration,
+#                 color=inputs_shift, 
+#                 linetype = model)) + 
+#   labs(title = "Regime Shift: Log10 scaled time",
+#        y = "Ratio of SOC to initial value",
+#        x = "Time (years)")
+
+Difference.df <-  temp <- full_join(NPPshift_Sim1.df %>%
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "One Pool"), 
+                  NPPshift_Sim5.df %>% 
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "Five Pool")) %>%
+  pivot_wider(names_from = model,
+              values_from = Soil_Carbon_Concentration) %>%
+  mutate(Difference = `Five Pool` - `One Pool`) 
+
+
+# ggplot(Difference.df%>%
+#   mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
+#   geom_line(aes(x=time, y=Difference, color = inputs_shift))
+# 
+# ggplot(Difference.df%>%
+#   mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
+#   geom_line(aes(x=time, y=Difference, color = inputs_shift)) + scale_x_log10()
+
+
+
+###Graphs for within 1% of each other
+
+temp1 <- Difference.df %>%
+  mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
+  mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
+  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-2))%>% 
+         filter(Close == "TRUE") %>%
+         mutate("NPP Shift" = as.numeric(inputs_shift))
+
+temp.01 <- Difference.df %>%
+  mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
+  mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
+  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-3))%>% 
+         filter(Close == "TRUE") %>%
+         mutate("NPP Shift" = as.numeric(inputs_shift))
+
+temp5 <- Difference.df %>%
+  mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
+  mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
+  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 5e-2)) %>% 
+         filter(Close == "TRUE") %>%
+         mutate("NPP Shift" = as.numeric(inputs_shift))
+
+
+temp_graph <- ggplot(temp5) + 
+  geom_point(aes(y=time, x=`NPP Shift`), color = "gray", size = 1, shape = 15, alpha = 0.01) +
+  geom_point(data = temp1, aes(y=time, x=`NPP Shift`, color = inputs_shift), size = 0.5, shape = 1) +
+  geom_point(data = temp.01, aes(y=time, x=`NPP Shift`), size = 1, shape = 4) +
+  labs(title = "Length of Simulation where Models agree",
+       subtitle = "One-pool within 5%, 1%, and 0.1% of the five-pool",
+       y = "Time (years)",
+       x = "Relative Shift in NPP (%)",
+       color = "Shift") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  theme_bw() +
+  theme(text = element_text(size = 9),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8),
+        plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 7),
+        legend.title = element_text(size = 6),
+        legend.position = "none") 
+
+ggsave("Figures/RegimeShift_SOC_Difference_bypercent.pdf",
+       plot = temp_graph,
+        device = pdf,
+       width = 8.7,
+       height = 6,
+       units = "cm")
+
+temp_graph
+
+```
+
+
+
+```{r CLOSER}
+
+Max_Model_Agreement1 <- data.frame("time" = NA,
+                                     "inputs_shift" = NA)
+
+for(i in NPP_shifts){
+  temp_max <- temp1 %>%
+    select(c(time, inputs_shift)) %>%
+    filter(inputs_shift == i)
+  
+  Max_time <- max(temp_max$time)
+  
+  temp_max <- temp_max %>%
+    filter(time == max(Max_time))
+
+  Max_Model_Agreement1 <- full_join(Max_Model_Agreement1, temp_max, by = join_by(time, inputs_shift)) 
+}
+
+ggplot(Max_Model_Agreement1) + 
+  geom_point(aes(x=inputs_shift, y=time))
+
+Hundred_Years_agreement <- Max_Model_Agreement1 %>%
+  filter(time == 100)
+
+test_range <- seq(as.numeric(min(Hundred_Years_agreement$inputs_shift)), 
+                  as.numeric(max(Hundred_Years_agreement$inputs_shift)),
+                  by = .001)
+
+
+SimTimes <- seq(0, 2e4, by = 1/6)
+
+
+#creating an empty data frame to populate through for loop
+NPPshift_Sim1.df <- data.frame(time=as.numeric(),
+                               Soil_Carbon_Concentration=as.numeric(),
+                               Respiration_Rate=as.numeric(),
+                               Input_Rate=as.numeric(),
+                               inputs_shift=as.character())
+
+for(i in test_range){
+
+Params_Aggregate.ls$NPPshift <- i 
+
+ temp <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  "Soil_Carbon_Concentration" = sum(FivePool_SS.fn(parms = Params_FivePool.ls))),
+                times = SimTimes,
+                func = OnePool_ODE.fn,
+                parms = Params_Aggregate.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Respiration_Rate = OnePool_ODE.fn(t = 1, 
+                                           y = c(NA, Soil_Carbon_Concentration),
+                                           parms = Params_Aggregate.ls
+                            )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    ) %>%
+  mutate(Input_Rate = Params_Aggregate.ls$inputs.fn(t = time,
+                                                  parms = Params_Aggregate.ls),
+         .by = everything()) %>%
+  mutate(inputs_shift = as.character(i) )
+ 
+ NPPshift_Sim1.df <- full_join(NPPshift_Sim1.df, 
+                               temp, 
+                               by = join_by(time, Soil_Carbon_Concentration, Respiration_Rate, Input_Rate, inputs_shift))
+
+}
+
+
+####FIVE POOL SIMULATIONS
+##Add needed function to parameter list for Five Pool simulations
+
+#creating an empty data frame to populate through for loop
+NPPshift_Sim5.df <- data.frame(time=as.numeric(),
+                               Metabolic_Plant_Residue=as.numeric(),
+                               Structural_Plant_Residue=as.numeric(),
+                               Fast_Soil=as.numeric(),
+                               Slow_Soil=as.numeric(),
+                               Passive_Soil=as.numeric(),
+                               Soil_Carbon_Concentration=as.numeric(),
+                               Respiration_Rate=as.numeric(),
+                               Input_Rate=as.numeric(),
+                               inputs_shift=as.character())
+
+for(i in test_range){
+
+Params_FivePool.ls$NPPshift <- i 
+
+ temp <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  FivePool_SS.fn(parms = Params_FivePool.ls)),
+                times = SimTimes,
+                func = FivePool_ODE.fn,
+                parms = Params_FivePool.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Soil_Carbon_Concentration = Metabolic_Plant_Residue + Structural_Plant_Residue + Fast_Soil + Slow_Soil + Passive_Soil) %>%
+  mutate(Respiration_Rate = FivePool_ODE.fn(t = 1, 
+                                           y = c("Cumulative_Respiration" = 0, 
+                                                Metabolic_Plant_Residue = Metabolic_Plant_Residue,
+                                                Structural_Plant_Residue = Structural_Plant_Residue,
+                                                Fast_Soil = Fast_Soil,
+                                                Slow_Soil = Slow_Soil,
+                                                Passive_Soil = Passive_Soil),
+                                            parms = Params_FivePool.ls
+                                  )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )%>%
+  mutate(Input_Rate = Params_FivePool.ls$inputs.fn(t = time,
+                                                  parms = Params_FivePool.ls),
+         .by = everything()
+  ) %>%
+  mutate(inputs_shift = as.character(i) )
+ 
+  NPPshift_Sim5.df <- full_join(NPPshift_Sim5.df, 
+                               temp,
+                               by = join_by(time, Metabolic_Plant_Residue, Structural_Plant_Residue, Fast_Soil, Slow_Soil, Passive_Soil, Soil_Carbon_Concentration, Respiration_Rate, Input_Rate, inputs_shift))
+ 
+}
+
+
+temp <- full_join(NPPshift_Sim1.df %>%
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "One Pool"), 
+                  NPPshift_Sim5.df %>% 
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "Five Pool")) %>%
+  mutate(Soil_Carbon_Concentration = Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))
+
+
+ggplot(temp) + 
+  geom_line(aes(x=time, 
+                y=Soil_Carbon_Concentration,
+                color=inputs_shift, 
+                linetype = model)) + 
+  scale_x_log10() +
+  labs(title = "Regime Shift: Log10 scaled time",
+       y = "Ratio of SOC to initial value",
+       x = "Time (years)") +   
+  theme(legend.position = "none") 
+  
+
+
+Difference.df <-  temp <- full_join(NPPshift_Sim1.df %>%
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "One Pool"), 
+                  NPPshift_Sim5.df %>% 
+                    select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
+                    mutate(model = "Five Pool")) %>%
+  pivot_wider(names_from = model,
+              values_from = Soil_Carbon_Concentration) %>%
+  mutate(Difference = `Five Pool` - `One Pool`) 
+
+temp <- Difference.df %>%
+  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-2))
+
+
+ggplot(temp %>% 
+         filter(Close == "TRUE") %>%
+         mutate("NPP Shift" = as.numeric(inputs_shift))) + 
+  geom_point(aes(x=time, y=`NPP Shift`, color = inputs_shift)) 
 
 
 ```
 
+
+# Sensitivity to inputs vector Ratios
+
+What if the inputs vector changes, i.e. faster-decaying or slower-decaying plants?
 
 ```{r}
 
+###Creates Parameters - shifting the input vector structural-metabolic C ratio
+Params_FivePool_shift_fast.ls <- Params_FivePool.ls
+Params_FivePool_shift_fast.ls$input_to_meta <- 8/9 #Originally 7/9
+Params_FivePool_shift_fast.ls$input_to_struc <- 1 - Params_FivePool_shift_fast.ls$input_to_meta 
+  #defines other litter parameter so that their total is 1
 
+Params_FivePool_shift_slow.ls <- Params_FivePool.ls
+Params_FivePool_shift_slow.ls$input_to_meta <- 6/9 #Originally 7/9
+Params_FivePool_shift_slow.ls$input_to_struc <- 1 - Params_FivePool_shift_slow.ls$input_to_meta
+  #defines other litter parameter so that their total is 1
+
+
+#Creating the Aggregate Decay Rates from the new Five-Pool Parameters
+Params_Aggregate_shift_fast.ls <- list(ave_inputs = Params_FivePool.ls$ave_inputs,
+                            turnoverTime = Proxy_decayrate.fn(parms = Params_FivePool_shift_fast.ls)
+                            )
+
+Params_Aggregate_shift_slow.ls <- list(ave_inputs = Params_FivePool.ls$ave_inputs, 
+                            turnoverTime = Proxy_decayrate.fn(parms = Params_FivePool_shift_slow.ls)
+                            )
+
+###Need a constant inputs function:
+constant_inputs.fn <- function(time, parms){
+  
+    u <- parms$ave_inputs
+  
+  return(u)
+}
+
+Params_Aggregate_shift_fast.ls$inputs.fn <- constant_inputs.fn
+Params_Aggregate_shift_slow.ls$inputs.fn <- constant_inputs.fn
+Params_FivePool_shift_slow.ls$inputs.fn <- constant_inputs.fn
+Params_FivePool_shift_fast.ls$inputs.fn <- constant_inputs.fn
+
+
+## ONE POOL SIMs
+temp <- lsoda(y = c("Cumulative_Respiration" = 0, 
+            "Soil_Carbon_Concentration" = sum(FivePool_SS.fn(parms = Params_FivePool.ls))), ##Initial Value uses original parameters
+                times = SimTimes,
+                func = OnePool_ODE.fn,
+                parms = Params_Aggregate_shift_fast.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Respiration_Rate = OnePool_ODE.fn(t = 1, 
+                                           y = c(NA, Soil_Carbon_Concentration),
+                                           parms = Params_Aggregate_shift_fast.ls
+                            )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    ) %>%
+  mutate(Litter_Decays = "Faster")
+
+Litter_Input_Ratio_OnePool <- full_join(temp, lsoda(y = c("Cumulative_Respiration" = 0, 
+            "Soil_Carbon_Concentration" = sum(FivePool_SS.fn(parms = Params_FivePool.ls))), ##Initial Value uses original parameters
+                times = SimTimes,
+                func = OnePool_ODE.fn,
+                parms = Params_Aggregate_shift_slow.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Respiration_Rate = OnePool_ODE.fn(t = 1, 
+                                           y = c(NA, Soil_Carbon_Concentration),
+                                           parms = Params_Aggregate_shift_slow.ls
+                            )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    ) %>%
+  mutate(Litter_Decays = "Slower"),
+  by = join_by(time, Soil_Carbon_Concentration, Respiration_Rate, Litter_Decays)
+)
+
+ggplot(Litter_Input_Ratio_OnePool) + 
+  geom_line(aes(x=time, y=Soil_Carbon_Concentration, linetype = Litter_Decays))
+  
+
+## FIVE POOL SIMs
+
+Litter_Input_Ratio_FivePool_faster <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  FivePool_SS.fn(parms = Params_FivePool.ls)),##Initial Value uses original parameters
+                times = SimTimes,
+                func = FivePool_ODE.fn,
+                parms = Params_FivePool_shift_fast.ls) %>% 
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Soil_Carbon_Concentration = Metabolic_Plant_Residue + Structural_Plant_Residue + Fast_Soil + Slow_Soil + Passive_Soil) %>%
+  mutate(Respiration_Rate = FivePool_ODE.fn(t = 1, 
+                                           y = c("Cumulative_Respiration" = 0, 
+                                                Metabolic_Plant_Residue = Metabolic_Plant_Residue,
+                                                Structural_Plant_Residue = Structural_Plant_Residue,
+                                                Fast_Soil = Fast_Soil,
+                                                Slow_Soil = Slow_Soil,
+                                                Passive_Soil = Passive_Soil),
+                                            parms = Params_FivePool_shift_fast.ls
+                                  )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )%>%
+  mutate(Litter_Decays = "Faster")
+
+
+Litter_Input_Ratio_FivePool_slower <- lsoda(y = c("Cumulative_Respiration" = 0, 
+                                  FivePool_SS.fn(parms = Params_FivePool.ls)), ##Initial Value uses original parameters
+                times = SimTimes,
+                func = FivePool_ODE.fn,
+                parms = Params_FivePool_shift_slow.ls) %>% 
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Soil_Carbon_Concentration = Metabolic_Plant_Residue + Structural_Plant_Residue + Fast_Soil + Slow_Soil + Passive_Soil) %>%
+  mutate(Respiration_Rate = FivePool_ODE.fn(t = 1, 
+                                           y = c("Cumulative_Respiration" = 0, 
+                                                Metabolic_Plant_Residue = Metabolic_Plant_Residue,
+                                                Structural_Plant_Residue = Structural_Plant_Residue,
+                                                Fast_Soil = Fast_Soil,
+                                                Slow_Soil = Slow_Soil,
+                                                Passive_Soil = Passive_Soil),
+                                            parms = Params_FivePool_shift_slow.ls
+                                  )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )%>%
+  mutate(Litter_Decays = "Slower")
+
+Litter_Input_Ratio_FivePool <- full_join(Litter_Input_Ratio_FivePool_faster,
+                                         Litter_Input_Ratio_FivePool_slower,
+  by = join_by(time, Soil_Carbon_Concentration, Respiration_Rate, Litter_Decays)
+)
+
+ggplot(Litter_Input_Ratio_FivePool) + 
+  geom_line(aes(x=time, y=Soil_Carbon_Concentration, linetype = Litter_Decays))
+
+
+ggplot(Litter_Input_Ratio_FivePool_faster %>%
+         pivot_longer(Metabolic_Plant_Residue:Passive_Soil,
+                      names_to = "Pool",
+                      values_to = "SOCC"
+                      )) + 
+  geom_line((aes(x=time, y=SOCC, color=Pool))) +
+  labs(title="Faster litter decay, by pool")
+
+
+ggplot(Litter_Input_Ratio_FivePool_slower %>%
+         pivot_longer(Metabolic_Plant_Residue:Passive_Soil,
+                      names_to = "Pool",
+                      values_to = "SOCC"
+                      )) + 
+  geom_line((aes(x=time, y=SOCC, color=Pool)))+
+  labs(title="Slower litter decay, by pool") + 
+  scale_x_log10()
+
+
+
+
+
+# ###TESTING SS with new parameters
+# ######Works now, commented out to avoid running excess unneeded code
+# 
+# temp <- lsoda(y = c("Cumulative_Respiration" = 0, 
+#                                   FivePool_SS.fn(parms = Params_FivePool_shift_slow.ls)), ##Initial Value uses new parameters to test steady state
+#                 times = SimTimes,
+#                 func = FivePool_ODE.fn,
+#                 parms = Params_FivePool_shift_slow.ls) %>% 
+#   as.data.frame() %>%
+#   select(!c(Cumulative_Respiration)) %>%
+#   mutate(Soil_Carbon_Concentration = Metabolic_Plant_Residue + Structural_Plant_Residue + Fast_Soil + Slow_Soil + Passive_Soil) %>%
+#   mutate(Respiration_Rate = FivePool_ODE.fn(t = 1, 
+#                                            y = c("Cumulative_Respiration" = 0, 
+#                                                 Metabolic_Plant_Residue = Metabolic_Plant_Residue,
+#                                                 Structural_Plant_Residue = Structural_Plant_Residue,
+#                                                 Fast_Soil = Fast_Soil,
+#                                                 Slow_Soil = Slow_Soil,
+#                                                 Passive_Soil = Passive_Soil),
+#                                             parms = Params_FivePool_shift_slow.ls
+#                                   )[[1]]['Cumulative_Respiration'],
+#           .by = everything()
+#     )
+# 
+# FivePool_ODE.fn(t = 0,
+#                 y=c("Cumulative_Respiration" = 0, 
+#                                   FivePool_SS.fn(parms = Params_FivePool_shift_slow.ls)),
+#                 parms = Params_FivePool_shift_slow.ls)
+# 
+# 
+# FivePool_SS.fn(parms = Params_FivePool.ls)
+# FivePool_SS.fn(parms = Params_FivePool_shift_slow.ls)
+# 
+# ggplot(temp) + 
+#   geom_line(aes(x=time, y=Soil_Carbon_Concentration))
+# 
+# temp <- temp %>% pivot_longer(Metabolic_Plant_Residue:Passive_Soil,
+#                               names_to = "Pool",
+#                               values_to = "SOCC")
+# ggplot(temp) + 
+#   geom_line(aes(x=time, y=SOCC, color=Pool))+
+#   scale_x_log10()
 
 ```
 
 
-
-
-
-
-#### BELOW NEEDS UPDATING  - MIGHT GET CUT ALTOGETHER
-
-# Model to Model Comparisons
-
-```{r}
-NPPshift_Sim_comp.df <- rbind(NPPshift_Sim1.df %>% 
-            pivot_longer(cols = c("Respiration_Rate", "Input_Rate"),
-                         names_to = "Rate_Type",
-                         values_to = "Rate") %>%
-            mutate(Model = case_when(Rate_Type == "Input_Rate" ~ "Input",
-                                     Rate_Type == "Respiration_Rate" ~ "OnePool")) %>%
-            select(c("time", "Soil_Carbon_Concentration", "Rate", "Model", "Shift")),
-           NPPshift_Sim5.df %>% 
-             rename(Rate = Respiration_Rate) %>%
-             select(c("time", "Rate", "Soil_Carbon_Concentration", "Shift")) %>% 
-             mutate(Model = "FivePool")
-           )
-
-ggplot(NPPshift_Sim_comp.df) +
-  geom_line(aes(x=time, y=Soil_Carbon_Concentration, color=Model, linetype = Shift)) +
-  labs(title = "Seasonal Simulation", subtitle = "Carbon Stocks", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
-
-ggplot(NPPshift_Sim_comp.df ) +
-  geom_line(aes(x=time, y=Rate, color=Model, linetype = Shift)) +
-  labs(title = "Seasonal Simulation", subtitle = "Respiration", x = "Time (years)", y = "Respiration Rate (gC per m2 per year)")
-
-
-ggplot(NPPshift_Sim_comp.df %>% 
-        select(c(time, Model, Soil_Carbon_Concentration, Shift))%>%
-         pivot_wider(names_from = Model,
-                     values_from = Soil_Carbon_Concentration)
-       ) +
-  geom_point(aes(x=FivePool, y = OnePool, color = Shift)) +
-  geom_abline(color='gray') 
-
-ggplot(NPPshift_Sim_comp.df %>% 
-        select(c(time, Model, Rate, Shift)) %>%
-         pivot_wider(names_from = Model,
-                     values_from = Rate) %>%
-         select(!Input)
-       ) +
-  geom_point(aes(x=FivePool, y = OnePool, color = Shift)) +
-  geom_abline(color='gray') 
-```
 
 

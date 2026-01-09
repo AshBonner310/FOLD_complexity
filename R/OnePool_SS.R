@@ -15,6 +15,9 @@
 #' 
 OnePool_SS.fn <- function(parms){
   ans <- parms$ave_inputs * parms$turnoverTime
-  return(c(Cumulative_Respiration = 0, 
-           Soil_Carbon_Concentration = ans))
+  
+  return(ans)
+  
+  # return(c(Cumulative_Respiration = 0, 
+  #          Soil_Carbon_Concentration = ans))
 }

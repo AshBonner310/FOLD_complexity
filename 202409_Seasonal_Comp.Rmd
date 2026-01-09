@@ -31,63 +31,16 @@ source("R/FivePool_SS.R")
 #parameters
 ##five pool
 
-light_sens_figs.df <- read_csv(file.path(
-  "DeAD_super_simp_light_sens_20240918.csv")) %>%
-  merge(parms_light_sens2, by = "index")
 
+Params_FivePool.df <- read_csv(file.path("Data/FivePoolModel_Parameters.csv"), show_col_types = FALSE)
+Params_FivePool.ls <- list()
 
-Params_FivePool.ls <- list(
-                  ##Input-based parameters (such as allocation)
-                  ave_inputs = 260,
-                        #CENUTRY model uses 260 grams C per m^2 per year
-                        #u; kg-carbon m-2 yr-1, 
-                    input_to_struc = 2/9,  
-                    input_to_meta = 7/9,  
-                        #C goes through litter pools first
-                    input_to_fast = 0,  
-                    input_to_slow = 0,  
-                    input_to_passive = 0,  
-                            
-                  ##turnover times (years)
-                     turnoverTime_meta = 3.5,  #this is CENTURY 1987, CENTURY 1983 has .1 to 1 year
-                     turnoverTime_struc = 9.5, #adjusted out of initial range to match CENTURY model validation for total plant residue
-                        # CENTURY: 1 to 5 years
-                     turnoverTime_fast = 10, #this is CENTURY 1987, CENTURY 1983 has 10 years
-                     turnoverTime_slow = 50, #adjusted, CENTURY 1987 has ~263, CENTURY 1983 has 50
-                     turnoverTime_passive = 2500, #adjusted, CENTURY 1987 has ~7690, CENTURY 1983 has 1500 years
-                     
-                  ##Transfer Matrix values 
-                       struc_to_fast = .7*.35, 
-                       struc_to_slow = .3*.35, 
-                          #60% lost to respiration, the remaining 40% is called Net Microbial Production 
-                          #Adjusted to 75% lost to respiration to reach model validations percentages
-                       meta_to_fast = .35,  
-                          #60% lost to respiration, rest to active
-                          #Adjusted to 75% lost to respiration to reach model validations percentages
-                       fast_to_slow = .4,      
-                          #60% lost to respiration, rest to slow
-                       slow_to_fast = 0.92*.4,        
-                       slow_to_passive = .08*.4,     
-                          #60% lost to respiration, rest split between active and passive
-                       passive_to_fast = .4,
-                    #.4,
-                          #60% lost to respiration, rest to slow
-                    
-                      #all the zero-flows
-                        meta_to_struc = 0,
-                        meta_to_slow = 0,
-                        meta_to_passive = 0,
-                        struc_to_meta = 0,
-                        struc_to_passive = 0,
-                        fast_to_passive = 0,
-                        fast_to_meta = 0,
-                        slow_to_meta = 0,
-                        passive_to_meta = 0,
-                        fast_to_struc = 0,
-                        slow_to_struc = 0,     
-                        passive_to_slow = 0,
-                        passive_to_struc = 0
-                       )
+for(i in 1:ncol(Params_FivePool.df)) {
+  Params_FivePool.ls[[i]] <- as.numeric(Params_FivePool.df[,i])
+}
+
+names(Params_FivePool.ls) <- colnames(Params_FivePool.df)
+
 
 #create the One-pool parameters with aggregate decay rate.
 Params_Aggregate.ls <- list(ave_inputs = 260, #g-C m-2 yr-1, according to CENTURY model validation
@@ -108,7 +61,7 @@ We'll use a weekly simulation over five years to determine fit.
 ##define a no-inputs function 
 seasonal.fn <- function(time, parms){
   Amplitude <- parms$ave_inputs
-  Horizontal_Shift <- 0.25 #0 #0.5 #simulation starts
+  Horizontal_Shift <- 0 #simulation starts
   Period <- 1 #Seasons are yearly
     B <- 2*pi*Period
     C <- Horizontal_Shift*B
@@ -120,7 +73,7 @@ seasonal.fn <- function(time, parms){
 }
 
 #Simulation Times vector
-SimTimes <- seq(0, 5, by = 1/104) 
+SimTimes <- seq(0, 500, by = 1/104) 
 
 Inputs_sim <- as.data.frame(SimTimes)%>%
   mutate(inputs = seasonal.fn(time = SimTimes, parms = Params_Aggregate.ls))
@@ -170,7 +123,9 @@ Seasonal_Sim5.df <- lsoda(y = c("Cumulative_Respiration" = 0,
                 parms = Params_FivePool.ls) %>%
   as.data.frame() %>%
   select(!c(Cumulative_Respiration)) %>%
-  mutate(Soil_Carbon_Concentration = Metabolic_Plant_Residue + Structural_Plant_Residue + Fast_Soil + Slow_Soil + Passive_Soil) %>%
+  mutate(Plant_Residue = Metabolic_Plant_Residue + Structural_Plant_Residue) %>%
+  mutate(Soil_Carbon_Concentration = Fast_Soil + Slow_Soil + Passive_Soil) %>%
+  mutate(Total_Carbon_Concentration = Plant_Residue + Soil_Carbon_Concentration) %>%
   mutate(Respiration_Rate = FivePool_ODE.fn(t = time, 
                                            y = c("Cumulative_Respiration" = 0, 
                                                 Metabolic_Plant_Residue = Metabolic_Plant_Residue,
@@ -204,9 +159,258 @@ ggplot(Seasonal_Sim5.df %>%
   geom_line(aes(x=time, y=Mass, linetype = Pool, color = Pool)) + 
   labs(title = "Seasonal Simulation: Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
 
+###Putting the two simmulations together into one data frame
+
+names(Seasonal_Sim1.df)[names(Seasonal_Sim1.df) == 'Soil_Carbon_Concentration'] <- 'Total_Carbon_Concentration'
+
+
+SeasonalSim.df <- full_join(Seasonal_Sim1.df %>% 
+                                mutate("model" = "One_Pool") %>% 
+                                select(!c("Input_Rate")),
+                              Seasonal_Sim5.df %>% 
+                                select(c("time", "Total_Carbon_Concentration", "Respiration_Rate")) %>%
+                                mutate("model" = "Five_Pool"),
+                              by = join_by(time, Total_Carbon_Concentration, Respiration_Rate, model)
+)
+
+ggplot(SeasonalSim.df) + 
+  geom_line(aes(x=time, y= Total_Carbon_Concentration, color= model))
+
+# ggplot(SeasonalSim.df) + 
+#   geom_line(aes(x=time, y= Total_Carbon_Concentration, color= model)) + scale_x_log10()
+
+ggplot(SeasonalSim.df) + 
+  geom_line(aes(x=time, y= Total_Carbon_Concentration, color= model)) +
+  xlim(495, 500)
+
+SeasonalSim.df <- SeasonalSim.df %>%
+  mutate(Fraction_SOC = Total_Carbon_Concentration/max(Total_Carbon_Concentration))%>%
+  mutate(Fraction_Resp = Respiration_Rate/max(Respiration_Rate))
+
+ggplot(SeasonalSim.df) + 
+  geom_line(aes(x=time, y=Fraction_SOC, color= model)) + scale_x_log10()
+
+
+ggplot(SeasonalSim.df) + 
+  geom_line(aes(x=time, y=Respiration_Rate, color= model)) + scale_x_log10()
+
+ggplot(SeasonalSim.df) + 
+  geom_line(aes(x=time, y=Respiration_Rate, color= model)) + scale_x_log10() + scale_y_log10()
+
+ggplot(SeasonalSim.df) + 
+  geom_line(aes(x=time, y=Fraction_Resp, color= model)) + scale_x_log10()
+
+ggplot(SeasonalSim.df) + 
+  geom_line(aes(x=time, y=Fraction_Resp, color= model)) + scale_x_log10() + scale_y_log10()
+
+
+#### LOOKING AT SOC #####
+
+SeasonSim_SOC_Diff.df <- SeasonalSim.df %>%
+  select(!c("Fraction_SOC", "Fraction_Resp", "Respiration_Rate")) %>%
+  pivot_wider(names_from = "model",
+              values_from = "Total_Carbon_Concentration") %>%
+  mutate(Difference = Five_Pool - One_Pool) %>%
+  mutate(Norm_Difference = Difference/max(One_Pool))
+
+ggplot(SeasonSim_SOC_Diff.df) + 
+  geom_line(aes(x=time, y=Norm_Difference))
+
+#### LOKING AT RESPIRATION #####
+
+# SeasonSim_Resp_Diff.df <- SeasonalSim.df %>%
+#   select(!c("Fraction_SOC", "Fraction_Resp", "Total_Carbon_Concentration")) %>%
+#   pivot_wider(names_from = "model",
+#               values_from = "Respiration_Rate") %>%
+#   mutate(Difference = One_Pool - Five_Pool) %>%
+#   mutate(Norm_Difference = Difference/max(One_Pool)) %>%
+#   filter(time <= 500)
+# 
+# ggplot(SeasonSim_Resp_Diff.df) + 
+#   geom_line(aes(x=time, y=Norm_Difference))
+# 
+# 
+# ggplot(SeasonSim_Resp_Diff.df) + 
+#   geom_line(aes(x=time, y=Difference)) + 
+#   geom_line(aes(x=time, y=One_Pool), color="red") + 
+#   geom_line(aes(x=time, y=Five_Pool), color="blue") + 
+#   scale_x_log10()
+
+
+ggplot(Seasonal_Sim5.df %>% pivot_longer(cols = Metabolic_Plant_Residue:Input_Rate,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Seasonal Simulation:Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "SOC (gC per m2) or Rate  (gC per m2 per year)")+
+  xlim(499,500)
+
+ggplot(Seasonal_Sim5.df %>% pivot_longer(cols = Metabolic_Plant_Residue:Input_Rate,
+                               names_to = "Pool",
+                               values_to = "Mass") %>%
+                            filter(time %% 1 == 0)
+         ) + 
+  geom_line(aes(x=time, y=Mass)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Seasonal Simulation:Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "SOC (gC per m2) or Rate  (gC per m2 per year)")
 
 ```
 
+```{r graphing the end}
+SpunUp_SeasonalSim.df <- SeasonalSim.df %>% 
+  filter(time >= 495) %>%
+  mutate(time = time - 495) 
+
+Ave_SOC <- sum(SpunUp_SeasonalSim.df$Total_Carbon_Concentration)/(5*104*2 +2) #104 time points each year, for five years, across two model simulations, plus an extra two points due to keeping t=0 and t=5
+
+SpunUp_SeasonalSim.df <- SpunUp_SeasonalSim.df %>%
+  mutate(Fraction_SOC = Total_Carbon_Concentration/Ave_SOC)
+
+Seasonal5 <- ggplot(SpunUp_SeasonalSim.df %>%
+         select(c(time, model, Fraction_SOC) )%>%
+         pivot_wider(names_from = model,
+                     values_from = Fraction_SOC)) + 
+  geom_line(aes(x=time, y = Five_Pool), color = "Black", linewidth = 0.25) + 
+  geom_line(aes(x=time, y = One_Pool), color = "green", alpha = 0.5, linewidth = 0.15) +
+  theme_bw() +
+  theme(text = element_text(size = 9),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8),
+        plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 7)) +
+  labs(y = "Fraction of Average SOC",
+       x = "Time (Years)")
+
+Seasonal1 <- ggplot(SpunUp_SeasonalSim.df %>%
+         select(c(time, model, Fraction_SOC) )%>%
+         pivot_wider(names_from = model,
+                     values_from = Fraction_SOC)) + 
+  geom_line(aes(x=time, y = Five_Pool), color = "Black", linewidth = 0.5) + 
+  geom_line(aes(x=time, y = One_Pool), color = "green", alpha = 0.75, linewidth = 0.5) +
+  theme_bw() +
+  theme(text = element_text(size = 9),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8),
+        plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 7)) +
+  labs(y = "Fraction of Average SOC",
+       x = "Time (Years)") + xlim(0,1)
+
+M2M_Comp.df <- SpunUp_SeasonalSim.df %>% 
+        select(c(time, model, Total_Carbon_Concentration))%>%
+         pivot_wider(names_from = model,
+                     values_from = Total_Carbon_Concentration) 
+
+SeasonalComp <- ggplot(M2M_Comp.df) + 
+  geom_abline(intercept = 0, slope = 1, color="red") + 
+  geom_point(aes(x = Five_Pool, y = One_Pool), alpha = 0.5, size = 0.5) +
+  labs(title = "Model-to-Model Comparison")+
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) 
+
+
+temp1 <- SeasonalComp / Seasonal5 / Seasonal1 + 
+  plot_layout(axes = "collect",
+              axis_titles = "collect",
+              heights = c(3, 3, 4)) 
+
+temp2 <- Seasonal5 / SeasonalComp | Seasonal1 + 
+  plot_layout(axes = "collect",
+              axis_titles = "collect" #,
+              # heights = c(1,1),
+              # widths = c(1,1)
+              ) 
+
+ggsave("Figures/Seasonal_SOC.pdf",
+        device = pdf, 
+       width = 17.8, #17.8, 11.4, or 8.7
+       height = 10,
+       units = "cm")
+
+
+ggplot(SpunUp_SeasonalSim.df %>%
+         select(c(time, model, Fraction_SOC) )%>%
+         pivot_wider(names_from = model,
+                     values_from = Fraction_SOC)) + 
+  geom_line(aes(x=time, y = Five_Pool), color = "black", linewidth = 0.5) + 
+  geom_line(aes(x=time, y = One_Pool), color = "red", alpha = 0.5, linewidth = 0.5) +
+  theme_bw() +
+  theme(text = element_text(size = 9),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8),
+        plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 7))  
+  labs(y = "Fraction of Average SOC") + xlim(0,5)
+
+# ggsave("Figures/Seasonal_SOC.pdf",
+#         device = pdf, 
+#        width = 17.8,
+#        height = 4,
+#        units = "cm")
+
+```
+
+
+
+```{r Paper Seasonal Graph}
+
+temp_df <- SeasonSim_SOC_Diff.df %>%
+                        mutate(Input_Rate = Inputs_sim$inputs) %>% 
+                        select(c("time", "One_Pool", "Five_Pool", "Input_Rate")) %>%
+                        pivot_longer(cols = One_Pool:Input_Rate,
+                                     names_to = "model",
+                                     values_to = "Resp") 
+                      
+
+temp_graph1 <- ggplot(temp_df) + 
+  geom_line(aes(x=time, y=Resp, color=model, linetype=model)) +
+  labs(y= "Soil Organic Carbon Concentration",  #(g-C per m^2 per yr)
+       color = "Model", 
+       linetype = "Model",
+       x = "Time (years)")+
+  theme_bw()+
+  theme(text = element_text(size = 9),
+        axis.title.y = element_text(size = 7),
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 6),
+        legend.justification = "center")
+
+temp_graph2 <- ggplot(SeasonSim_SOC_Diff.df) + 
+  geom_line(aes(x=time, y=Difference)) + 
+  geom_hline(yintercept = 0, linetype="dashed", color="gray") + 
+  labs(x = "Time (years)") +
+  theme_classic() +
+  theme(text = element_text(size = 9),
+        axis.title.y = element_text(size = 8))
+
+# temp_graph1 / temp_graph2 +
+#   plot_layout(axes = "collect",
+#               axis_titles = "collect",
+#               heights = c(5,2)) #+
+#   #plot_annotation(tag_levels = "A")
+
+# temp_graph1 <- temp_graph1 + scale_x_log10()
+# temp_graph2 <- temp_graph2 + scale_x_log10()
+# 
+Seasonal_SOC_graph <- temp_graph1 / temp_graph2 +
+  plot_layout(axes = "collect",
+              axis_titles = "collect",
+              heights = c(5,2))
+
+ggsave("Figures/Seasonal_SOC.pdf",
+        device = pdf, 
+       width = 17.8,
+       height = 6,
+       units = "cm")
+
+Seasonal_SOC_graph
+
+```
 
 # Model to Model Comparisons
 
@@ -295,7 +499,7 @@ ggplot(temp)+
   geom_line(aes(x=time, y=DifferenceRelativeToInputRate))
 
 
-ggplot(IncubPercentage.df %>% filter(time <=1) ) + 
+ggplot(IncubPercentage.df %>% filter(time >=1) ) + 
   geom_line(aes(x=time, y=DifferenceRelativeToFivePoolModel)) + 
   geom_line(data = SeasonPercentage.df %>% filter(time <=1), aes(x=time, y=DifferenceRelativeToFivePoolModel)) 
 ```
