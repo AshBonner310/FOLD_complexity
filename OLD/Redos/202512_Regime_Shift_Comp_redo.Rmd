@@ -28,14 +28,16 @@ First, setting up our models for testing.
 
 ```{r model_setup}
 #functions
-source("R/AggregateDecayRate.R")
-source("R/OnePool_ODE.R")
-source("R/FivePool_ODE.R")
-source("R/FivePool_SS.R")
+### DEV NOTE: none of these work from this file, as these files are in a different folder path ###
+# source("R/AggregateDecayRate.R")
+# source("R/OnePool_ODE.R")
+# source("R/FivePool_ODE.R")
+# source("R/FivePool_SS.R")
 
 #parameters
-##five pool
-temp <- read_csv(file.path("Data/FivePoolModel_Parameters.csv"), show_col_types = FALSE)
+##five pool model parameters
+### DEV NOTE: this also does not work from this file, as this file is in a different folder path ###
+# temp <- read_csv(file.path("Data/FivePoolModel_Parameters.csv"), show_col_types = FALSE)
 Params_FivePool.ls <- list()
 
 for(i in 1:ncol(temp)) {
@@ -413,7 +415,7 @@ Heatmap_sim <- full_join(temp1.df,temp5.df) %>%
 
 
 ggplot(Heatmap_sim) + 
-  geom_line(aes(x = time, y = Soil_Carbon_Concentration, color = Input_Rate/260))+
+  geom_line(aes(x = time, y = Soil_Carbon_Concentration, color = Input_Rate/260, group = Input_Rate))+
   facet_wrap(~Model, ncol = 1)
 
 ggsave("test.pdf")

@@ -82,7 +82,7 @@ SimTimes <- c(seq(0, 50, by = 1/12), # first ten years, by month
 
 Inputs_sim <- as.data.frame(SimTimes)
 
-NPP_shifts <- c(0, 0.25, 0.5, 0.75, 0.9, 0.95, 1, 1.05, 1.1, 1.25, 1.5, 1.75, 2)
+NPP_shifts <- seq(0, 2, by = 0.20) #c(0, 0.25, 0.5, 0.75, 0.9, 0.95, 1, 1.05, 1.1, 1.25, 1.5, 1.75, 2)
 
 for(i in 1:length(NPP_shifts)){
 
@@ -263,33 +263,51 @@ Initial_Sim_Runs.df <- full_join(NPPshift_Sim1.df %>%
 ```
 
 ```{r first plot}
+### Cannot have a dashed line type (e.g., difference line types based on model)
+# ggplot(Initial_Sim_Runs.df) + 
+#   geom_line(data = Initial_Sim_Runs.df,
+#              aes(x=time, 
+#                 y=Soil_Carbon_Concentration,
+#                 color = `Shift in NPP`, #inputs_shift,
+#                 group = `Shift in NPP`,
+#             linetype = model),
+#             linewidth = 0.25) 
 
+
+#Create a column to refer manual linetype for legend
+modelsim <- c("One Pool" = "dashed",
+          "Five Pool" = "solid")
 
 temp.graph <- ggplot(Initial_Sim_Runs.df) + 
   geom_line(data = Initial_Sim_Runs.df %>% filter(model == "One Pool"),
              aes(x=time, 
                 y=Soil_Carbon_Concentration,
                 color = `Shift in NPP`, #inputs_shift,
-                group = `Shift in NPP`),
-            linetype = "solid",
-            linewidth = 0.25) + 
+                group = `Shift in NPP`,
+                linetype = "dashed"),
+            linewidth = 0.5,
+            show.legend = TRUE) + 
   geom_line(data = Initial_Sim_Runs.df %>% filter(model == "Five Pool"),
              aes(x=time, 
                 y=Soil_Carbon_Concentration,
                 color = `Shift in NPP`, #inputs_shift,
-                group = `Shift in NPP`),
-            linetype = "dashed",
-            linewidth = 0.25) + 
+                group = `Shift in NPP`,
+            linetype = "solid"),
+            linewidth = 0.5) + 
   scale_x_log10() +
-  labs(linetype = "Model") + 
-  theme_bw() #+ 
-  #guides(colour = "none") 
+  labs(linetype = "Model") +
+  scale_linetype_manual(
+    values = c("dashed", "solid"),
+    labels = c("One Pool", "Five Pool")
+  ) +
+  scale_color_gradientn(colors=wes_palette(n=11, name="Zissou1Continuous"))
+  #scale_color_gradientn(colours = rainbow(5))
 
 Initial_Sim.graph <- temp.graph + 
   labs(title = "Regime Shift Forward Run",
        x = "Time (years)",
-       y = "Ratio of SOC to initial value",
-       linetype = "Model") +
+       y = "Ratio of SOC to initial value"
+       ) +
   theme(text = element_text(size = 9),
         axis.title.y = element_text(size = 8),
         legend.title = element_text(size = 6),
@@ -298,18 +316,11 @@ Initial_Sim.graph <- temp.graph +
 
 Initial_Sim.graph
 
+
 ```
 
 
 ```{r}
-ggsave("Figures/RegimeShift_SOC_Forward_Runs.pdf",
-       plot = Initial_Sim.graph,
-        device = pdf, 
-       width = 8.7,
-       height = 5,
-       units = "cm")
-  
-
 # ggplot(Initial_Sim_Runs.df) + 
 #   geom_line(aes(x=time, 
 #                 y=Soil_Carbon_Concentration,
@@ -330,15 +341,34 @@ Difference.df <- full_join(NPPshift_Sim1.df %>%
   mutate(Difference = `Five Pool` - `One Pool`) 
 
 
-ggplot(Difference.df%>%
+###### Difference graph but no log-scale
+# ggplot(Difference.df%>%
+#   mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
+#   geom_line(aes(x=time, y=Difference, color = inputs_shift))
+
+temp.graph <- ggplot(Difference.df%>%
   mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
-  geom_line(aes(x=time, y=Difference, color = inputs_shift))
+  geom_line(aes(x=time, 
+                y=Difference, 
+                color = as.numeric(inputs_shift),
+                group = as.numeric(inputs_shift)
+                )) + 
+  scale_x_log10() +
+  scale_color_gradientn(colors=wes_palette(n=11, name="Zissou1Continuous"))
+  #scale_color_gradientn(colours = rainbow(5))
 
-ggplot(Difference.df%>%
-  mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
-  geom_line(aes(x=time, y=Difference, color = inputs_shift)) + scale_x_log10()
+Difference.graph <- temp.graph + 
+  labs(color = "Shift in NPP",
+       title = "Difference in SOC simulation",
+       x = "Time (years)",
+       y = "Ratio of SOC to initial value") +
+  theme(text = element_text(size = 9),
+        axis.title.y = element_text(size = 8),
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 6),
+        legend.justification = "center")
 
-
+Difference.graph
 
 # temp <- NPPshift_Sim5.df%>% 
 #          select(time, Metabolic_Plant_Residue, Structural_Plant_Residue, Fast_Soil, Slow_Soil, Passive_Soil, inputs_shift) %>%
@@ -384,63 +414,78 @@ ggplot(Difference.df%>%
 
 ```
 
+```{r Paper Figure}
 
-```{r Difference Analysis}
+Initial_Sim.graph / Difference.graph + 
+  plot_layout(guides = 'collect',
+              axes = 'collect') 
+
+ggsave("Figures/RegimeShift_SOC_Forward_Runs.pdf",
+        device = pdf, 
+       width = 8.7,
+       height = 6,
+       units = "in")
+
+```
+
+
+
+```{r eval = FALSE, Difference Analysis }
   
-  
-temp <- Difference.df %>%
-  mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
-  mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
-  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
-  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-2)) %>%
-         mutate("Shift in NPP" = as.numeric(inputs_shift))
-  
-
-# ggplot(temp) +
-#   geom_line(aes(x=time, y=`Normalized Difference to OG steady state`, color=inputs_shift))
-
-Forward_Run_Difference.graph <- ggplot(temp) +
-  geom_line(aes(x=time, 
-                y=`Normalized Difference to OG steady state`, 
-                color= inputs_shift),
-            linewidth = 0.4) + 
-  scale_x_log10() + 
-  theme_bw() + 
-  labs(y = "Difference (% of Original State)",
-       x = "Time (years)",
-      color = "Shift in NPP") +
-  guides(color = guide_legend(override.aes = list(linewidth = 1))) +
-  theme(text = element_text(size = 9),
-        axis.title.y = element_text(size = 8),
-        legend.title = element_text(size = 6),
-        legend.text = element_text(size = 6),
-        legend.justification = "center", 
-        legend.key.size = unit(0.2, "lines"))
-
-
-
-Temp_Initial_Sim.graph <- temp.graph + 
-  labs(y = "Ratio of SOC to initial value",
-       x = "Time (years)") +
-  theme(text = element_text(size = 9),
-        axis.title.y = element_text(size = 8),
-        legend.title = element_text(size = 6),
-        legend.text = element_text(size = 6),
-        legend.justification = "center", 
-        legend.key.size = unit(0.3, "lines"))
-
-
-
-Temp_Initial_Sim.graph  / Forward_Run_Difference.graph +   
-  plot_layout(axes = "collect", 
-              guides = 'collect')
-
-
-ggsave("Figures/RegimeShift_SOC_Forward_Runs_Difference.pdf",
-       device = pdf, 
-       width = 17.8,
-       height = 9,
-       units = "cm")
+###DEV NOTE:: ALL of this was done in previous chunks, commenting now in case there's something else here I want, but likely not.
+# temp <- Difference.df %>%
+#   mutate("Normalized Difference to Five Pool model" = Difference/`Five Pool`) %>%
+#   mutate("Close to Five Pool" = (abs(`Normalized Difference to Five Pool model`) <= 1e-2)) %>%
+#   mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
+#   mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-2)) %>%
+#          mutate("Shift in NPP" = as.numeric(inputs_shift))
+#   
+# 
+# # ggplot(temp) +
+# #   geom_line(aes(x=time, y=`Normalized Difference to OG steady state`, color=inputs_shift))
+# 
+# Forward_Run_Difference.graph <- ggplot(temp) +
+#   geom_line(aes(x=time, 
+#                 y=`Normalized Difference to OG steady state`, 
+#                 color= inputs_shift),
+#             linewidth = 0.4) + 
+#   scale_x_log10() + 
+#   theme_bw() + 
+#   labs(y = "Difference (% of Original State)",
+#        x = "Time (years)",
+#       color = "Shift in NPP") +
+#   guides(color = guide_legend(override.aes = list(linewidth = 1))) +
+#   theme(text = element_text(size = 9),
+#         axis.title.y = element_text(size = 8),
+#         legend.title = element_text(size = 6),
+#         legend.text = element_text(size = 6),
+#         legend.justification = "center", 
+#         legend.key.size = unit(0.2, "lines"))
+# 
+# 
+# 
+# Temp_Initial_Sim.graph <- temp.graph + 
+#   labs(y = "Ratio of SOC to initial value",
+#        x = "Time (years)") +
+#   theme(text = element_text(size = 9),
+#         axis.title.y = element_text(size = 8),
+#         legend.title = element_text(size = 6),
+#         legend.text = element_text(size = 6),
+#         legend.justification = "center", 
+#         legend.key.size = unit(0.3, "lines"))
+# 
+# 
+# 
+# Temp_Initial_Sim.graph  / Forward_Run_Difference.graph +   
+#   plot_layout(axes = "collect", 
+#               guides = 'collect')
+# 
+# 
+# ggsave("Figures/RegimeShift_SOC_Forward_Runs_Difference.pdf",
+#        device = pdf, 
+#        width = 17.8,
+#        height = 9,
+#        units = "cm")
 
 
 
@@ -452,6 +497,7 @@ ggsave("Figures/RegimeShift_SOC_Forward_Runs_Difference.pdf",
 #   geom_line(aes(x=time, y=`Normalized Difference to Five Pool model`, color=inputs_shift)) + 
 #   ylim(-0.35,0.35) +
 #   scale_x_log10()
+
 
 
 
