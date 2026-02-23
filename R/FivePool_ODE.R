@@ -23,7 +23,7 @@
 #' (none yet)
 #' 
 #' 
-FivePool_ODE.fn <- function(t, #vector of times
+FivePool_ODE.fn <- function(t, #time of integration
                              y, #6-valued vector in the order of Cummulative Respiration, then pools in ascending order based on turnover time (descending based on decay rate - faster-decaying pools first, so Litter-Metabolic, Litter-Structural, Soil-Fast, Soil-Slow, Soil-Passive)
                              parms, #Parameter list conatining input_type, inputs (monthly average), all allocation of inputs into pools, and all transfer rates between the pools.
                              rel_tol = 1e-10 #our default relative tolerance

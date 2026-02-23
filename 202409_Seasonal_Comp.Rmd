@@ -80,7 +80,8 @@ Inputs_sim <- as.data.frame(SimTimes)%>%
 
 ggplot(Inputs_sim) + 
   geom_line(aes(x = SimTimes, y=inputs)) + 
-  labs(title = "Inputs over Simulation period", x = "Time (years)", y = "Soil Carbon Inputs (gC per m2 per year)")
+  labs(title = "Inputs over Simulation period", x = "Time (years)", y = "Soil Carbon Inputs (gC per m2 per year)") + 
+  xlim(400,500)
 ```
 
 
@@ -261,7 +262,8 @@ SpunUp_SeasonalSim.df <- SeasonalSim.df %>%
   filter(time >= 495) %>%
   mutate(time = time - 495) 
 
-Ave_SOC <- sum(SpunUp_SeasonalSim.df$Total_Carbon_Concentration)/(5*104*2 +2) #104 time points each year, for five years, across two model simulations, plus an extra two points due to keeping t=0 and t=5
+Ave_SOC <- sum(SpunUp_SeasonalSim.df$Total_Carbon_Concentration)/(5*104*2 +2) 
+  #104 time points each year, for five years, across two model simulations, plus an extra two points due to keeping t=0 and t=5
 
 SpunUp_SeasonalSim.df <- SpunUp_SeasonalSim.df %>%
   mutate(Fraction_SOC = Total_Carbon_Concentration/Ave_SOC)
@@ -364,23 +366,35 @@ temp_df <- SeasonSim_SOC_Diff.df %>%
                         select(c("time", "One_Pool", "Five_Pool", "Input_Rate")) %>%
                         pivot_longer(cols = One_Pool:Input_Rate,
                                      names_to = "model",
-                                     values_to = "Resp") 
+                                     values_to = "Resp") %>%
+  filter(time >= 495)
                       
 
 temp_graph1 <- ggplot(temp_df) + 
   geom_line(aes(x=time, y=Resp, color=model, linetype=model)) +
-  labs(y= "Soil Organic Carbon Concentration",  #(g-C per m^2 per yr)
+  labs(y= "Soil Input and Respiration Rates",  #(g-C per m^2 per yr)
        color = "Model", 
-       linetype = "Model",
-       x = "Time (years)")+
-  theme_bw()+
+       #linetype = "Model",
+       x = "Time (years)") +
+  theme_bw() +
   theme(text = element_text(size = 9),
         axis.title.y = element_text(size = 7),
         legend.title = element_text(size = 6),
         legend.text = element_text(size = 6),
         legend.justification = "center")
 
-temp_graph2 <- ggplot(SeasonSim_SOC_Diff.df) + 
+inset_graph <- ggplot(temp_df %>% filter(model != "Input_Rate")) + 
+  geom_line(aes(x=time, y=Resp, color=model, linetype=model), show.legend = FALSE) +
+  theme_bw() +
+  theme(text = element_text(size = 9),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 6),
+        legend.justification = "center")
+
+temp_graph2 <- ggplot(SeasonSim_SOC_Diff.df %>%
+  filter(time >= 495)) + 
   geom_line(aes(x=time, y=Difference)) + 
   geom_hline(yintercept = 0, linetype="dashed", color="gray") + 
   labs(x = "Time (years)") +
@@ -396,8 +410,10 @@ temp_graph2 <- ggplot(SeasonSim_SOC_Diff.df) +
 
 # temp_graph1 <- temp_graph1 + scale_x_log10()
 # temp_graph2 <- temp_graph2 + scale_x_log10()
-# 
-Seasonal_SOC_graph <- temp_graph1 / temp_graph2 +
+ 
+temp_graph_winset <- temp_graph1 + inset_element(inset_graph, 0.05, 0.3, 0.95, 0.8) 
+
+Seasonal_SOC_graph <- temp_graph_winset / temp_graph2 +
   plot_layout(axes = "collect",
               axis_titles = "collect",
               heights = c(5,2))
@@ -409,6 +425,8 @@ ggsave("Figures/Seasonal_SOC.pdf",
        units = "cm")
 
 Seasonal_SOC_graph
+
+
 
 ```
 

@@ -209,46 +209,7 @@ Params_FivePool.ls$NPPshift <- NPP_shifts[i]
  
 }
 
-# ggplot(NPPshift_Sim5.df %>% pivot_longer(cols = Metabolic_Plant_Residue:Input_Rate,
-#                                names_to = "Pool",
-#                                values_to = "Mass")) + 
-#   geom_line(aes(x=time, y=Mass, color = inputs_shift)) + 
-#   facet_wrap(~ Pool, ncol=1, scales='free') + 
-#   labs(title = "Regime Shift", subtitle = "Stacked Carbon Stocks and Rates by Pool", x = "Time (years)", y = "SOC (gC per m2) or Rate  (gC per m2 per year)")
-# 
-# 
-# 
-# ggplot(NPPshift_Sim5.df %>%
-#          mutate(Plant_Residue = Metabolic_Plant_Residue + Structural_Plant_Residue) %>%
-#          select(!c('Respiration_Rate', 'Metabolic_Plant_Residue', 'Structural_Plant_Residue')) %>%
-#          pivot_longer(cols = c('Fast_Soil', 'Slow_Soil', 'Passive_Soil', 'Plant_Residue'),
-#                                   names_to = 'Pool',
-#                                   values_to = 'Mass')) + 
-#   geom_line(aes(x=time, y=Mass, color = inputs_shift)) +
-#   facet_wrap(~ Pool, ncol=1, scales='free') + 
-#   labs(title = "Regime Shift", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "SOC (gC per m2)")
-# 
-# 
-# ggplot(NPPshift_Sim5.df %>%
-#          mutate(Plant_Residue = Metabolic_Plant_Residue + Structural_Plant_Residue) %>%
-#          select(!c('Respiration_Rate', 'Metabolic_Plant_Residue', 'Structural_Plant_Residue')) %>%
-#          pivot_longer(cols = c('Fast_Soil', 'Slow_Soil', 'Passive_Soil', 'Plant_Residue', 'Soil_Carbon_Concentration'),
-#                                   names_to = 'Pool',
-#                                   values_to = 'Mass')) +
-#   geom_line(aes(x=time, y=Mass, color = inputs_shift, linetype = Pool)) + 
-#   labs(title = "Regime Shift: Five Pools", subtitle = "Carbon Stocks by Pool", x = "Time (years)", y = "Soil Carbon Concentration (gC per m2)")
 
-
-
-# ggplot(NPPshift_Sim1.df) + 
-#   geom_line(aes(x=time, 
-#                 y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)),
-#                 color=inputs_shift), linetype="dashed") +
-#   geom_line(data = NPPshift_Sim5.df, aes(x=time, y=Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)), color=inputs_shift), linetype="dotted") + 
-#   scale_x_log10() + 
-#   labs(title = "Regime Shift: Log10 scaled time",
-#        y = "Ratio of SOC to initial value",
-#        x = "Time (years), log10-scaled")
 
 Initial_Sim_Runs.df <- full_join(NPPshift_Sim1.df %>%
                     select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
@@ -422,9 +383,9 @@ Initial_Sim.graph / Difference.graph +
 
 ggsave("Figures/RegimeShift_SOC_Forward_Runs.pdf",
         device = pdf, 
-       width = 8.7,
-       height = 6,
-       units = "in")
+       width = 17.8,
+       height = 8,
+       units = "cm")
 
 ```
 
@@ -853,25 +814,6 @@ temp <- full_join(NPPshift_Sim1.df %>%
   mutate(Soil_Carbon_Concentration = Soil_Carbon_Concentration/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))
 
 
-# ggplot(temp) + 
-#   geom_line(aes(x=time, 
-#                 y=Soil_Carbon_Concentration,
-#                 color=inputs_shift, 
-#                 linetype = model)) + 
-#   scale_x_log10() + 
-#   labs(title = "Regime Shift: Log10 scaled time",
-#        y = "Ratio of SOC to initial value",
-#        x = "Time (years), log10-scaled")
-# 
-# ggplot(temp) + 
-#   geom_line(aes(x=time, 
-#                 y=Soil_Carbon_Concentration,
-#                 color=inputs_shift, 
-#                 linetype = model)) + 
-#   labs(title = "Regime Shift: Log10 scaled time",
-#        y = "Ratio of SOC to initial value",
-#        x = "Time (years)")
-
 Difference.df <-  temp <- full_join(NPPshift_Sim1.df %>%
                     select(c("time", "Soil_Carbon_Concentration", "inputs_shift")) %>%
                     mutate(model = "One Pool"), 
@@ -882,14 +824,6 @@ Difference.df <-  temp <- full_join(NPPshift_Sim1.df %>%
               values_from = Soil_Carbon_Concentration) %>%
   mutate(Difference = `Five Pool` - `One Pool`) 
 
-
-# ggplot(Difference.df%>%
-#   mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
-#   geom_line(aes(x=time, y=Difference, color = inputs_shift))
-# 
-# ggplot(Difference.df%>%
-#   mutate(Difference = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls)))) +
-#   geom_line(aes(x=time, y=Difference, color = inputs_shift)) + scale_x_log10()
 
 
 
@@ -939,20 +873,195 @@ temp_graph <- ggplot(temp5) +
         legend.title = element_text(size = 6),
         legend.position = "none") 
 
-ggsave("Figures/RegimeShift_SOC_Difference_bypercent.pdf",
-       plot = temp_graph,
-        device = pdf,
-       width = 8.7,
-       height = 6,
-       units = "cm")
+#ggsave("Figures/RegimeShift_SOC_Difference_bypercent.pdf",
+#        plot = temp_graph,
+#         device = pdf,
+#        width = 8.7,
+#        height = 6,
+#        units = "cm")
 
 temp_graph
 
 ```
+# Using a RK integration to test model agreement
+
+```{r Difference Calculations}
+#Resolutoin of forward run set here for easy changing later
+time_step_resolution <- 1/12
+#End of simulation set here for easy change later
+max_time <- 10000
+
+#Set the granularity of the NPP shift
+NPP_shifts <- c(seq(0.5, 0.99, by = 0.01),seq(1.01, 1.5, by = 0.01))
+
+#Set the model agreement you desire (what's the maximum difference you will tolerate)
+max_diff <- 0.05
+
+Mature_Soil_FivePools <- c("Cumulative_Respiration" = 0, 
+                                  FivePool_SS.fn(parms = Params_FivePool.ls))
+
+Mature_Soil_OnePool <- c("Cumulative_Respiration" = 0, 
+                                  "Soil_Carbon_Concentration" = sum(FivePool_SS.fn(parms = Params_FivePool.ls)))
+
+RK_timestep.fn <- function(ODE.fn,
+                           ODE_parms,
+                           first_point,
+                           first_time,
+                           time_step = time_step_resolution,
+                           method = "Euler"
+)  { 
+  
+  
+  k1 <- ODE.fn(t = first_time,
+               y = first_point, 
+               parms = ODE_parms)[[1]]
+  
+  
+  if (method == "Euler"){
+    
+    return(first_point + k1*time_step)
+    
+  }else{
+    stop("Methods using midpoint not developed yet, please use Euler for now.")
+    # ODE_drivers_mid <- (ODE_drivers_first + ODE_drivers_second) / 2
+    # 
+    # k2 <- ODE.fn(y = first_point + k1*(time_step/2), 
+    #              parms = ODE_parms,
+    #              drivers = ODE_drivers_mid)[[1]]
+    # 
+    # if (method == "Second Midpoint"){
+    #   
+    #   return(first_point + k2*time_step)
+    #   
+    # }else{
+    #   
+    #   k3 <- ODE.fn(y = first_point + k2*(time_step/2), 
+    #                parms = ODE_parms,
+    #                drivers = ODE_drivers_mid)[[1]]
+    #   
+    #   k4 <- ODE.fn(y = first_point + k3*time_step,
+    #                parms = ODE_parms,
+    #                drivers = ODE_drivers_second)[[1]]
+    #   
+    #   return(first_point + ((k1 + 2*k2 + 2*k3 + k4)/6)*time_step)
+    #   
+    #}
+  }
+}
 
 
+tic <- Sys.time()
 
-```{r CLOSER}
+for(j in NPP_shifts){
+  
+    #Make an empty dataframe with proper col names to fill
+    Max_Model_Agreement <- data.frame(NPP_shift = NA,
+                                      Time = NA)
+
+for(i in seq(0, max_time, by = time_step_resolution)){
+  
+  if(i == 0){
+    
+
+    
+    # Forward_run <- data.frame("Hour" = 0,
+    #                           "Difference" = 0) %>%
+    #   as.data.frame()
+    
+    Five_Pools <- RK_timestep.fn(ODE.fn = FivePool_ODE.fn,
+                           ODE_parms = Params_FivePool.ls,
+                           first_point = Mature_Soil_FivePools,
+                           first_time = i,
+                           time_step = time_step_resolution,
+                           method = "Euler")
+
+    
+    Five_Pool_Endpoint_Approx <- Five_Pools 
+    Five_Pools_sum <- sum(Five_Pools) - Five_Pools["Cumulative_Respiration"]
+    
+    One_Pool <- RK_timestep.fn(ODE.fn = OnePool_ODE.fn,
+                           ODE_parms = Params_Aggregate.ls,
+                           first_point = Mature_Soil_OnePool,
+                           first_time = i,
+                           time_step = time_step_resolution,
+                           method = "Euler"
+      
+    )
+    
+    One_Pool_Endpoint_Approx <- One_Pool
+    
+    
+    Model_Difference <- One_Pool["Soil_Carbon_Concentration"] - Five_Pools_sum 
+    
+    
+    # Forward_run <- rbind(Forward_run,
+    #                      data.frame("Hour" = i + time_step_resolution,
+    #                                 "Difference" = Model_Difference))
+    
+          
+  }else{
+    
+    
+    Five_Pools <- RK_timestep.fn(ODE.fn = FivePool_ODE.fn,
+                           ODE_parms = Params_FivePool.ls,
+                           first_point = Five_Pool_Endpoint_Approx,
+                           first_time = i,
+                           time_step = time_step_resolution,
+                           method = "Euler")
+
+    
+    Five_Pool_Endpoint_Approx <- Five_Pools 
+    Five_Pools_sum <- sum(Five_Pools) - Five_Pools["Cumulative_Respiration"]
+    
+    One_Pool <- RK_timestep.fn(ODE.fn = OnePool_ODE.fn,
+                           ODE_parms = Params_Aggregate.ls,
+                           first_point = One_Pool_Endpoint_Approx,
+                           first_time = i,
+                           time_step = time_step_resolution,
+                           method = "Euler"
+                           
+    )
+    
+    
+    Model_Difference <- One_Pool["Soil_Carbon_Concentration"] - Five_Pools_sum
+    
+    if(abs(Model_Difference)/Mature_Soil_OnePool["Cumulative_Respiration"] >= max_diff){
+      
+      
+      break
+      
+    }
+    # Forward_run <- rbind(Forward_run,
+    #                      data.frame("Hour" = i + time_step_resolution,
+    #                                 "Difference" = Model_Difference))
+    
+    
+  }
+
+}
+
+
+Max_Model_Agreement <- rbind(Max_Model_Agreement,
+                             data.frame(NPP_shift = j,
+                                        Time = i)
+                             )
+}
+
+toc <- Sys.time()
+
+toc - tic 
+# 3.842853 secs secs for one five-pool run, 100 years, monthly
+# 0.4154561 secs secs for difference between one and five pools for 100 years, monthly
+# 15.73555 secs secs secs for difference between one and five pools for 1000 years, monthly
+# 0.09623694 secs for a max time calculation for NPP shift of 90%
+
+# ggplot(Forward_run) +
+#   geom_line(aes(x = Hour, y = Difference))
+
+```
+
+
+```{r CLOSER eval = FALSE}
 
 Max_Model_Agreement1 <- data.frame("time" = NA,
                                      "inputs_shift" = NA)
@@ -1103,18 +1212,12 @@ Difference.df <-  temp <- full_join(NPPshift_Sim1.df %>%
               values_from = Soil_Carbon_Concentration) %>%
   mutate(Difference = `Five Pool` - `One Pool`) 
 
-temp <- Difference.df %>%
-  mutate("Normalized Difference to OG steady state" = Difference/sum(FivePool_SS.fn(parms = Params_FivePool.ls))) %>%
-  mutate("Close" = (abs(`Normalized Difference to OG steady state`) <= 1e-2))
-
-
-ggplot(temp %>% 
-         filter(Close == "TRUE") %>%
-         mutate("NPP Shift" = as.numeric(inputs_shift))) + 
-  geom_point(aes(x=time, y=`NPP Shift`, color = inputs_shift)) 
-
 
 ```
+
+
+
+
 
 
 # Sensitivity to inputs vector Ratios
