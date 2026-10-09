@@ -1,0 +1,326 @@
+---
+title: "Cascade Figure"
+author: "Ashley Bonner"
+format: html
+---
+
+Set up libraries,
+
+```{r}
+#| label: setup
+#| include : FALSE
+
+
+library(tidyverse) #data library
+library(deSolve) #ODE solver
+library(patchwork) #figure arrangement
+library(dplyr) #data wrangling
+
+```
+
+Source needed functions,
+
+```{r}
+#| label: source
+#| include : FALSE
+
+
+source("R/IndependentThreePool.R")
+source("R/CascadeThreePool.R")
+
+```
+
+and we're ready to go!
+
+We have to set up our parameters - We'll use a simplified version of CENTURY model parameters, where the fast pool decays at a rate of 0.5-1 year, the slow pool at a rate of 10-50 years, and the passive pool at rates of 1000-5000 years.
+We'll also use transfer parameters from the soil (not litter) pools of Century, but only the ones that flow from faster pools into slower pools, and assume the others are zero to create a proper Cascade style model.
+
+This successfully has our pools at different orders of magnitude.
+
+We also set up our input function (for this figure we will assume constant inputs).
+Generally, we'll run the simulation to 100 years.
+
+```{r}
+#| Parameters
+#| echo: FALSE
+
+Params_CascThreePool.ls <- list(
+                  ##Input-based parameters (such as allocation)
+                    ave_inputs = 260,
+                        #CENUTRY model uses 260 grams C per m^2 per year
+                        #u; kg-carbon m-2 yr-1,
+                    input_1 = 0.65, #WAG
+                    input_2 = 0.325, #WAG
+                    
+                  ##Transfer between pools
+                    fast_to_slow    = 0.4,
+                    fast_to_passive = 0,
+                    slow_to_passive = 0.032,
+
+                  ##turnover times (years)
+  
+                     turnoverTime_1 = 1, #based on recent DAYCENT papers
+                     turnoverTime_2 = 50, #adjusted, CENTURY 1987 has ~263, CENTURY 1983 has 50
+                     turnoverTime_3 = 1500 #adjusted, CENTURY 1987 has ~7690, CENTURY 1983 has 1500 years
+  )
+
+
+Params_CascThreePool.ls$input_3 <- 1- Params_CascThreePool.ls$input_1 - Params_CascThreePool.ls$input_2
+
+constant.fn <- function(time, parms){
+  return(parms$ave_inputs)
+}
+
+#Simulation Times vector
+SimTimes <- seq(0, 5000, by = 1/12)
+
+Params_CascThreePool.ls$inputs.fn <- constant.fn
+
+Params_CascThreePool.ls
+
+```
+
+
+We'll consider a disturbed system at two-thirds its steady state values for initial state.
+
+
+```{r}
+#| label: Three-pool forward run
+
+CascThreePool_InitialValue <- 2/3*c(
+  Cumulative_Respiration = 0,
+  Soil_1 = Params_CascThreePool.ls$ave_inputs * Params_CascThreePool.ls$input_1 * Params_CascThreePool.ls$turnoverTime_1,
+  Soil_2 = Params_CascThreePool.ls$ave_inputs * Params_CascThreePool.ls$input_2 * Params_CascThreePool.ls$turnoverTime_2,
+  Soil_3 = Params_CascThreePool.ls$ave_inputs * Params_CascThreePool.ls$input_3 * Params_CascThreePool.ls$turnoverTime_3
+  )
+
+CascThreePool_Sim.df <- lsoda(y = CascThreePool_InitialValue,
+                times = SimTimes,
+                func = CascThreePool_ODE.fn,
+                parms = Params_CascThreePool.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration))
+
+###We're not interested in specific numbers, so we're going to normalize this to a the three-pool steady state
+ThreePoolSS <- with(Params_CascThreePool.ls,
+                    ave_inputs * (turnoverTime_1*input_1 +  (turnoverTime_2*input_2) + (turnoverTime_3*input_3))
+)
+
+##Spits out a graph for initial verification
+Stacked3.gr <- ggplot(CascThreePool_Sim.df %>% pivot_longer(cols = Soil_1:Soil_3,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_area(aes(x=time, y=Mass/ThreePoolSS, fill=Pool)) + 
+  #facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Three Pool forward run", x = "Time (years)", y = "Soil Carbon (portion of steady state)") 
+
+##Spits out a graph for initial verification
+Faceted3.gr <- ggplot(CascThreePool_Sim.df %>% pivot_longer(cols = Soil_1:Soil_3,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass/ThreePoolSS)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Three Pool forward run", x = "log_10 Time (years)", y = "Soil Carbon (portion of total steady state)") + scale_x_log10()
+
+Faceted3.gr + Stacked3.gr
+
+```
+From here, the goal is to re-parameterize the model to turn it into an independent model.
+
+We'll functionally need to do two things for this:
+- Re-form our Initial Value
+- Transform out inputs
+
+to make this work.
+
+Convieniently, the decay rates actually stay the same between the Reduced Complexity to Independent and Cascade models.
+
+```{r}
+#| label: Eigen Decomposition
+
+### Creating the vectors and matrices needed for reduction ###
+allocation_vector <- with(Params_CascThreePool.ls,
+                            matrix(c( input_1, 
+                                      input_2, 
+                                      input_3),
+                              nrow = 3
+                              )
+                            )
+  
+decay_matrix <- with(Params_CascThreePool.ls, 
+                       diag(x= 1/c( turnoverTime_1,
+                                    turnoverTime_2,
+                                    turnoverTime_3
+                                    )
+                            )
+                       )
+  
+  
+transfer_matrix <- with(Params_CascThreePool.ls,
+                          matrix(c(
+                                    1,                   0,                 0,     
+                                    -fast_to_slow,       1,                 0,    
+                                    -fast_to_passive,    -slow_to_passive,  1
+                                    ),
+                                 nrow = 3,
+                                 byrow=TRUE)
+                          )
+
+Matrix_G <- transfer_matrix %*% decay_matrix
+  
+### Check Eigen Decomposition ###
+
+isTRUE(all.equal(
+                  eigen(Matrix_G)$vectors %*% diag(eigen(Matrix_G)$values) %*% solve(eigen(Matrix_G)$vectors),
+                  Matrix_G
+                  )
+        )
+
+```
+
+```{r}
+#| label: Reparameterize
+
+RCMThreePool_InitialValue <- c(0,
+  solve(eigen(Matrix_G)$vectors) %*% CascThreePool_InitialValue[2:4])
+
+names(RCMThreePool_InitialValue) <- c("Cumulative_Respiration", "Soil_1", "Soil_2", "Soil_3")
+
+#Reparametrize the input allocation
+RCM_Inputs <- solve(eigen(Matrix_G)$vectors) %*% c(Params_CascThreePool.ls$input_1, 
+                                     Params_CascThreePool.ls$input_2, 
+                                     Params_CascThreePool.ls$input_3)
+
+### New parameters adopted from old parameters....
+Params_RCMThreePool.ls <- Params_CascThreePool.ls
+
+### ...with some changes:
+Params_RCMThreePool.ls$input_1 <- RCM_Inputs[1]  #/sum(RCM_Inputs)
+Params_RCMThreePool.ls$input_2 <- RCM_Inputs[2] #/sum(RCM_Inputs)
+Params_RCMThreePool.ls$input_3 <- RCM_Inputs[3] #/sum(RCM_Inputs)
+
+Params_RCMThreePool.ls$input_1 + Params_RCMThreePool.ls$input_2 + Params_RCMThreePool.ls$input_3
+```
+
+Let's run an independent model with our new parameters and see how close we get.
+
+```{r}
+#| label: RCM Forward run
+
+RCMThreePool_Sim.df <- lsoda(y = RCMThreePool_InitialValue,
+                times = SimTimes,
+                func = IndThreePool_ODE.fn,
+                parms = Params_RCMThreePool.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  rename(PreTrans_Soil_1 = Soil_1,
+         PreTrans_Soil_2 = Soil_2,
+         PreTrans_Soil_3 = Soil_3) %>%
+  mutate(Soil_1 = NA,
+         Soil_2 = NA,
+         Soil_3 = NA)
+
+
+
+for (i in 1:nrow(RCMThreePool_Sim.df)){
+  
+Transformed_back <- eigen(Matrix_G)$vectors %*% c(RCMThreePool_Sim.df$PreTrans_Soil_1[i],
+                                                  RCMThreePool_Sim.df$PreTrans_Soil_2[i],
+                                                  RCMThreePool_Sim.df$PreTrans_Soil_3[i])
+
+RCMThreePool_Sim.df$Soil_1[i] <- Transformed_back[1]
+RCMThreePool_Sim.df$Soil_2[i] <- Transformed_back[2]
+RCMThreePool_Sim.df$Soil_3[i] <- Transformed_back[3]
+
+}
+
+##Spits out a graph for initial verification
+Stacked3.gr <- ggplot(RCMThreePool_Sim.df %>% pivot_longer(cols = Soil_1:Soil_3,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_area(aes(x=time, y=Mass/ThreePoolSS, fill=Pool)) + 
+  #facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Three Pool forward run", x = "Time (years)", y = "Soil Carbon (portion of steady state)") 
+
+##Spits out a graph for initial verification
+Faceted3.gr <- ggplot(RCMThreePool_Sim.df %>% pivot_longer(cols = Soil_1:Soil_3,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass/ThreePoolSS)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Three Pool forward run", x = "log_10 Time (years)", y = "Soil Carbon (portion of total steady state)") + scale_x_log10()
+
+Faceted3.gr + Stacked3.gr
+
+```
+
+Now we get to compare the two models!
+
+```{r}
+
+ggplot() + 
+  geom_line(data = RCMThreePool_Sim.df %>% pivot_longer(cols = Soil_1:Soil_3,
+                               names_to = "Pool",
+                               values_to = "Mass"),
+            aes(x=time, y=Mass/ThreePoolSS)) + 
+    geom_line(data = CascThreePool_Sim.df %>% pivot_longer(cols = Soil_1:Soil_3,
+                               names_to = "Pool",
+                               values_to = "Mass"),
+            aes(x=time, y=Mass/ThreePoolSS),
+            linetype = "dotted") + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Three Pool forward run", x = "Time (years)", y = "Soil Carbon (portion of total steady state)") + scale_x_log10()
+
+```
+
+Let's see a comparison between the three (regular Cascade $C(t)$, $PC*(t)$, and $C^*(t)$).
+
+```{r}
+Comp.df <-  full_join(CascThreePool_Sim.df %>%
+                   mutate("C(t)" = Soil_1 + Soil_2 + Soil_3) %>%
+                   select(c("time", "C(t)")),
+                 RCMThreePool_Sim.df %>%
+                   mutate("C*(t)" = PreTrans_Soil_1 + PreTrans_Soil_2 + PreTrans_Soil_3,
+                          "PC*(t)" = Soil_1 + Soil_2 + Soil_3) %>%
+                   select(c("time", "C*(t)", "PC*(t)")),
+                 by = join_by(time)
+                 )
+
+Pretransform.plot <- ggplot(Comp.df) + 
+  #theme(line = element_line(linewidth = 2))+
+  geom_line(aes(x=time, y=`C*(t)`), color = "red")+ 
+  geom_line(aes(x=time, y=`C(t)`), color = "black")+
+  theme_minimal()
+
+Transformed.plot <- ggplot(Comp.df) + 
+  #theme(line = element_line(linewidth = 2))+
+  geom_line(aes(x=time, y=`PC*(t)`), color = "lightblue", linewidth = 1.5)+
+  geom_line(aes(x=time, y=`C(t)`), color = "black", linewidth = 0.5)+
+  theme_minimal()
+
+
+comp.plot <- ggplot(Comp.df %>%
+         filter(time %% 3 == 0))+
+  geom_point(aes(x = `C(t)`, y = `C*(t)`), color = "red", alpha = 0.5) +
+  geom_point(aes(x = `C(t)`, y = `PC*(t)`), color = "lightblue") +
+  geom_abline(slope = 1, intercept = 0, color = "black") + 
+  labs(x = "Three-Pool Cascade Model Simulation",
+       y = "Reduced-Indpendent Model Simulations")+
+  theme_minimal() 
+
+
+(Pretransform.plot + Transformed.plot ) /
+  comp.plot
+
+ggsave(
+  "CascadeRCM.pdf",
+  device = "pdf",
+  path = "Figures/",
+  width = 8.7,
+  height = 9,
+  units = "cm",
+  dpi = "retina"
+)
+
+```
+

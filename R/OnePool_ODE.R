@@ -11,7 +11,7 @@
 #' A sequence of time values, at whatever resolution desired. This model is designed to run in a yearly timestep.
 #' 
 #' @param y 
-#' A vector containing two named elements, CO2 and soil, in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cumulative CO2 released.
+#' A vector containing two named elements, CO2 and soil, in that order, representing the initial value for an lsoda forward run/simulation. CO2 should be zero to start as this will track the Cummulative CO2 released.
 #' 
 #' @param parms 
 #' Consists of a list containing 'ave_inputs' and 'turnoverTime', where turnoverTime is in months and inputs can be either a number for static carbon inputs or a vector representing inputs over time.

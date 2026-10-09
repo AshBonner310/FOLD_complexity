@@ -1,0 +1,371 @@
+---
+title: "Independent RCM example"
+author: "Ashley Bonner"
+format: html
+---
+
+Set up libraries,
+
+```{r}
+#| label: setup
+#| include : FALSE
+
+
+library(tidyverse) #data library
+library(deSolve) #ODE solver
+library(patchwork) #figure arrangement
+library(dplyr) #data wrangling
+
+```
+
+Source needed functions,
+
+```{r}
+#| label: source
+#| include : FALSE
+
+
+source("R/IndependentThreePool.R")
+source("R/OnePool_ODE.R")
+
+```
+
+and we're ready to go!
+
+We have to set up our parameters - We'll use a simplified version of CENTURY model parameters, where the fast pool decays at a rate of 0.5-1 year, the slow pool at a rate of 10-50 years, and the passive pool at rates of 1000-5000 years.
+
+This successfully has our pools at different orders of magnitude.
+
+We also set up our input function (for this figure we will assume constant inputs).
+Generally, we'll run the simulation to 500 years, as we are primarily interested in showing how this works across orders of magnitude of time in the future. 
+Our argument is that this strategy works for time scales on the order of our middle pool - around 50 years (so generally between 10 and 100 years).
+
+```{r}
+#| Parameters
+#| echo: FALSE
+
+Params_IndThreePool.ls <- list(
+                  ##Input-based parameters (such as allocation)
+                  ave_inputs = 260,
+                        #CENUTRY model uses 260 grams C per m^2 per year
+                        #u; kg-carbon m-2 yr-1,
+                    input_1 = 0.65,
+                    input_2 = 0.325,
+
+                  ##turnover times (years)
+  
+                     turnoverTime_1 = 1, #based on recent DAYCENT papers
+                     turnoverTime_2 = 50, #adjusted, CENTURY 1987 has ~263, CENTURY 1983 has 50
+                     turnoverTime_3 = 1500 #adjusted, CENTURY 1987 has ~7690, CENTURY 1983 has 1500 years
+  )
+
+
+Params_IndThreePool.ls$input_3 <- 1- Params_IndThreePool.ls$input_1 - Params_IndThreePool.ls$input_2
+
+constant.fn <- function(time, parms){
+  return(parms$ave_inputs)
+}
+
+#Simulation Times vector
+SimTimes <- seq(0, 5e3, by = 1/12)
+
+Params_IndThreePool.ls$inputs.fn <- constant.fn
+
+Params_IndThreePool.ls
+```
+
+
+We'll consider a disturbed system at two-thirds its steady state values for initial state.
+
+
+```{r}
+#| label: Three-pool forward run
+
+IndThreePool_InitialValue <- 2/3*c(
+  Cumulative_Respiration = 0,
+  Soil_1 = Params_IndThreePool.ls$ave_inputs * Params_IndThreePool.ls$input_1 * Params_IndThreePool.ls$turnoverTime_1,
+  Soil_2 = Params_IndThreePool.ls$ave_inputs * Params_IndThreePool.ls$input_2 * Params_IndThreePool.ls$turnoverTime_2,
+  Soil_3 = Params_IndThreePool.ls$ave_inputs * Params_IndThreePool.ls$input_3 * Params_IndThreePool.ls$turnoverTime_3
+  )
+
+IndThreePool_Sim.df <- lsoda(y = IndThreePool_InitialValue,
+                times = SimTimes,
+                func = IndThreePool_ODE.fn,
+                parms = Params_IndThreePool.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Respiration_Rate = IndThreePool_ODE.fn(t = NA, 
+                                           y = c(NA, Soil_1, Soil_2, Soil_3),
+                                           parms = Params_IndThreePool.ls
+                            )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )
+
+###We're not interested in specific numbers, so we're going to normalize this to a the three-pool steady state
+ThreePoolSS <- with(Params_IndThreePool.ls,
+                    ave_inputs * (turnoverTime_1*input_1 +  (turnoverTime_2*input_2) + (turnoverTime_3*input_3))
+)
+
+##Spits out a graph for initial verification
+Stacked3.gr <- ggplot(IndThreePool_Sim.df %>% pivot_longer(cols = Soil_1:Soil_3,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_area(aes(x=time, y=Mass/ThreePoolSS, fill=Pool)) + 
+  #facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Three Pool forward run", x = "Time (years)", y = "Soil Carbon (portion of steady state)") 
+
+##Spits out a graph for initial verification
+Faceted3.gr <- ggplot(IndThreePool_Sim.df %>% pivot_longer(cols = Soil_1:Soil_3,
+                               names_to = "Pool",
+                               values_to = "Mass")) + 
+  geom_line(aes(x=time, y=Mass/ThreePoolSS)) + 
+  facet_wrap(~ Pool, ncol=1, scales='free') + 
+  labs(title = "Three Pool forward run", x = "log_10 Time (years)", y = "Soil Carbon (portion of total steady state)") + scale_x_log10()
+
+Faceted3.gr + Stacked3.gr
+
+```
+
+We'll convert these params and initial value into a new ODE... and see what happens!
+
+```{r}
+#| label: One-pool forward run
+
+#Create a function that turns an independent three-pool parameterization into one-pool model parameters
+
+IndpendentRCM_OnePool_params.fn <- function(Initial_Value,
+                             Parms){
+ New_Parms <- list(
+                  ##Input parameter
+                  ave_inputs = (1/Parms$turnoverTime_2)* #decay times...
+                    ( #...the sum of...
+                      (Parms$ave_inputs * Parms$input_1 * Parms$turnoverTime_1) +     #...steady state of the fast pool,
+                        (Parms$ave_inputs * Parms$input_2 * Parms$turnoverTime_2) +   #... steady state of the slow pool,
+                        Initial_Value[4]                                              #...and the initial value of the Passive pool.
+                      ),
+                  ##Inputs function
+                  inputs.fn = Parms$inputs.fn,
+                  ##turnover time (years)
+                  turnoverTime = Parms$turnoverTime_2
+                  
+  )
+    
+    
+  return(New_Parms = New_Parms)
+}
+
+##Function that takes the initial value and parameters and spits out a new one-pool initial value
+IndpendentRCM_OnePool_IV.fn <- function(Initial_Value,
+                             Parms){
+
+  New_IV <- (Parms$ave_inputs * Parms$input_1 * Parms$turnoverTime_1) + Initial_Value["Soil_2"] + Initial_Value["Soil_3"]
+  #Initial Values are retained for pool of interest and for slower pools, faster pools are considered to start at their steady state.
+  
+  
+  return(New_Initial_Value = c(Cumulative_Respiration = 0,
+                          Soil_Carbon_Concentration = unname(New_IV)
+                          )
+  )
+}
+ 
+
+Params_IndRCM.ls <- IndpendentRCM_OnePool_params.fn(Initial_Value = IndThreePool_InitialValue,
+                                                    Parms = Params_IndThreePool.ls)
+
+IndRCM_InitialValue <- IndpendentRCM_OnePool_IV.fn(Initial_Value = IndThreePool_InitialValue,
+                                                   Parms = Params_IndThreePool.ls)
+
+
+IndRCM_Sim.df <- lsoda(y = IndRCM_InitialValue,
+                times = SimTimes,
+                func = OnePool_ODE.fn,
+                parms = Params_IndRCM.ls) %>%
+  as.data.frame() %>%
+  select(!c(Cumulative_Respiration)) %>%
+  mutate(Respiration_Rate = OnePool_ODE.fn(t = NA, 
+                                           y = c(NA, Soil_Carbon_Concentration),
+                                           parms = Params_IndRCM.ls
+                            )[[1]]['Cumulative_Respiration'],
+          .by = everything()
+    )
+
+###As before, we're not interested in specific numbers, so we're going to normalize this to a this model's steady state
+RCMSS <- sum(with(Params_IndThreePool.ls,
+                    ave_inputs * (turnoverTime_1*input_1 +  turnoverTime_2*input_2)
+),
+                  IndThreePool_InitialValue["Soil_3"]
+)
+
+
+# ##Spits out a graph for initial verification
+IndRCM.gr <- ggplot(IndRCM_Sim.df) +
+  geom_line(aes(x=time, y=Soil_Carbon_Concentration/RCMSS)) +
+  labs(title = "Independent Reduced Complexity forward run", x = "log_10 Time (years)", y = "Soil Carbon (portion of steady state)") + scale_x_log10()
+
+IndRCM.gr
+
+```
+
+
+Now, we compare.
+Recall, our argument only applies for timescales on the order of magnitude of our middle pool (in this example).
+So we expect that if we start slicing timescales, this will be very different.
+
+```{r}
+
+Comparison.df <- rbind(IndRCM_Sim.df %>% mutate(Model = "RCM") %>%
+        select(c(time, Soil_Carbon_Concentration, Model)),
+      IndThreePool_Sim.df %>% mutate(Soil_Carbon_Concentration = Soil_1 + Soil_2 + Soil_3,
+                                     Model = "Ind3") %>%
+        select(c(time, Soil_Carbon_Concentration, Model))
+)
+
+Logtime.gr <- ggplot(Comparison.df) +# %>% filter(time <= 100) %>% filter(time >= 10)) +
+  geom_line(aes(x=time, y=Soil_Carbon_Concentration/ThreePoolSS, linetype=Model)) +
+  #scale_linetype_manual(values = c("solid", "dotdash"))+
+  scale_linetype_discrete(labels = c("Ind. 3-pool model", "Reduced Complexity Model"))+
+  labs(title = "Multi-pool Independent vs Reduced Complexity Model", 
+       x = "Time (years)", 
+       y = "Soil Carbon (% of steady state)") +
+  scale_x_log10(labels = scales::comma) +
+  annotate("rect", fill = "red", alpha = 0.5, 
+        xmin = 10, xmax = 100,
+        ymin = 0.68, ymax = 0.78) +
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        #legend.frame = element_rect(colour = "black",
+        #                           linewidth = 1),
+        legend.background = element_rect(color = "black", fill = "white"),
+        legend.frame = element_rect(color = "black"),
+        panel.grid.minor = element_blank(),
+        text = element_text(size = 7),
+        title = element_text(size = 8),
+        legend.text = element_text(size = 6)
+        ) 
+
+Zoomed_in.gr <- ggplot(Comparison.df %>% filter(time <= 100) %>% filter(time >= 10)) +
+  geom_line(aes(x=time, y=Soil_Carbon_Concentration/ThreePoolSS, linetype=Model)) +
+  labs(#title = "Independent Reduced Complexity forward run comparisons", 
+       x = "Time (years)", 
+       y = "Soil Carbon") +
+  scale_y_continuous(position = "right") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5),
+        axis.title.y = element_blank(),
+        panel.border = element_rect(colour = "red", 
+                                    fill=NA, 
+                                    linewidth=1),
+        text = element_text(size = 6))
+
+# #Full sim graph with time not transformed by log10 
+# ggplot(Comparison.df) +# %>% filter(time <= 100) %>% filter(time >= 10)) +
+#   geom_line(aes(x=time, y=Soil_Carbon_Concentration/ThreePoolSS, linetype=Model)) +
+#   labs(title = "Independent Reduced Complexity forward run comparisons", x = "Time (years)", y = "Soil Carbon (% of steady state)")
+
+Logtime.gr + inset_element(Zoomed_in.gr, 
+                            left = 0.05,
+                            bottom = 0.45,
+                            right = 0.6,
+                            top = 1
+                           ) +
+  theme(text = element_text(size = 6))
+
+ggsave(
+  "IndependentRCM.pdf",
+  device = "pdf",
+  path = "Figures/",
+  width = 8.7,
+  height = 9,
+  units = "cm",
+  dpi = "retina"
+)
+
+```
+
+# Pulling some numbers.
+
+```{r}
+Difference.df <- Comparison.df %>%
+  pivot_wider(names_from = Model,
+              values_from = Soil_Carbon_Concentration) %>%
+  mutate(Difference = abs(Ind3-RCM)) %>%
+  mutate(SSNormalizedDifference = (Difference/sum(ThreePoolSS))*100,
+         Ind3NormalizedDifference = (Difference/Ind3)*100) 
+
+Difference.df %>%
+  filter(time %in% c(0.5, 10, 20, 30, 50, 100, 1000, 10000)) %>%
+  mutate(Error = paste(round(Ind3NormalizedDifference,2), "%")) %>%
+  select(c("time", "Error")) 
+
+ggplot(Difference.df) + 
+  geom_line(aes(x = time, y = Ind3NormalizedDifference)) +
+  scale_x_log10() + 
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        #legend.frame = element_rect(colour = "black",
+        #                           linewidth = 1),
+        legend.background = element_rect(color = "black", fill = "white"),
+        legend.frame = element_rect(color = "black"),
+        panel.grid.minor = element_blank(),
+        text = element_text(size = 7),
+        title = element_text(size = 8),
+        legend.text = element_text(size = 6)
+        ) 
+```
+
+
+
+
+
+# OLD
+The following was used to help me debunk an issue I was having and is now obsolete (though not incorrect).
+
+```{r}
+#| label: non-ODEs
+
+Solution_OnePool <- tibble("time" = SimTimes,
+                           "Carbon" = with(Params_IndThreePool.ls,
+                                           (ave_inputs*input_1*turnoverTime_1)  + #first (fast) pool at steady state
+                                            IndThreePool_InitialValue["Soil_3"] + #third (passive) pool at initial value
+                                            #Solution for second (middle, 'slow') pool 
+                                             (ave_inputs*input_2*turnoverTime_2 - #middle pool SS less...
+                                               (ave_inputs*input_2*turnoverTime_2 - IndThreePool_InitialValue["Soil_2"]) * 
+                                                exp(-SimTimes/turnoverTime_2)
+                                               )
+                                           )
+)
+
+
+Solution_ThreePool <- tibble("time" = SimTimes,
+                           "Pool_1" = with(Params_IndThreePool.ls, 
+                                           ave_inputs*input_1*turnoverTime_1 - 
+                                               (ave_inputs*input_1*turnoverTime_1 - IndThreePool_InitialValue["Soil_1"]) * 
+                                                exp(-SimTimes/turnoverTime_1)
+                                               ),
+                           "Pool_2" = with(Params_IndThreePool.ls, 
+                                           ave_inputs*input_2*turnoverTime_2 - 
+                                               (ave_inputs*input_2*turnoverTime_2 - IndThreePool_InitialValue["Soil_2"]) * 
+                                                exp(-SimTimes/turnoverTime_2)
+                                               ),
+                           "Pool_3" = with(Params_IndThreePool.ls, 
+                                           ave_inputs*input_3*turnoverTime_3 - 
+                                               (ave_inputs*input_3*turnoverTime_3 - IndThreePool_InitialValue["Soil_3"]) * 
+                                                exp(-SimTimes/turnoverTime_3)
+                                               )
+                           ) %>%
+  mutate("Carbon" = Pool_1 + Pool_2 +Pool_3)
+
+
+ggplot() + 
+  geom_line(data = Solution_OnePool, aes(x=time, y=Carbon)) + 
+  geom_line(data = Solution_ThreePool, aes(x=time, y=Carbon)) + 
+  xlim(10,100)
+
+```
+
+
+
+
+
+
